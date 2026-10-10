@@ -26,19 +26,56 @@ namespace Understory
         [SerializeField] float maxGap = 1.5f;
         [SerializeField] bool playOnStart = true;
         [SerializeField] bool loop;
+        [Tooltip("Robot-free demo: pressing Start survey (mission panel) after a replay finished plays the next " +
+                 "of these without clearing, so the hub archives the previous mission for before/after.")]
+        [SerializeField] string[] nextMissions = { "m2" };
 
         // Matches fake_data/generate.py: 12 frames x 2 s per capture.
         const double CaptureSeconds = 24.0;
 
         Coroutine playback;
+        bool clearOnRun = true;
+        int nextIndex;
+        RosSurveySource ros;
+        MissionPanel panel;
 
         public bool IsPlaying => playback != null;
+        public bool Finished { get; private set; }
 
         void Start()
         {
             if (hub == null) hub = SurveyHub.Instance;
             if (hub == null) { Debug.LogError("[FakeSurveySource] No SurveyHub in scene."); return; }
+            ros = FindAnyObjectByType<RosSurveySource>();
+            panel = FindAnyObjectByType<MissionPanel>();
+            if (panel != null) panel.Pressed += OnPanel;
             if (playOnStart) Play();
+        }
+
+        void OnDestroy()
+        {
+            if (panel != null) panel.Pressed -= OnPanel;
+        }
+
+        /// <summary>Mission panel drives the replay while there's no live ROS data (demo without the robot).</summary>
+        void OnPanel(string keyword)
+        {
+            if (ros != null && ros.IsLive) return; // the real mission manager handles it
+            if (keyword == "start" && !IsPlaying)
+            {
+                if (Finished && nextMissions != null && nextIndex < nextMissions.Length) PlayNextMission();
+                else Play();
+            }
+            else if (keyword == "stop") Stop();
+        }
+
+        /// <summary>Replay the next mission in nextMissions on top of the current one (no clear -> archive).</summary>
+        public void PlayNextMission()
+        {
+            missionId = nextMissions[nextIndex++];
+            Stop();
+            clearOnRun = false;
+            playback = StartCoroutine(Run());
         }
 
         [ContextMenu("Play (restart)")]
@@ -62,9 +99,11 @@ namespace Understory
 
         IEnumerator Run()
         {
+            Finished = false;
             do
             {
-                hub.Clear();
+                if (clearOnRun) hub.Clear();
+                clearOnRun = true;
                 string root = MissionRoot();
                 Debug.Log($"[FakeSurveySource] Replaying {root}");
 
@@ -115,6 +154,7 @@ namespace Understory
                 Debug.Log("[FakeSurveySource] Replay finished.");
                 if (loop) yield return new WaitForSeconds(3f);
             } while (loop);
+            Finished = true;
             playback = null;
         }
 

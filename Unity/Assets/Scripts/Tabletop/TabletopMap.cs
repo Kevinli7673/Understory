@@ -32,6 +32,8 @@ namespace Understory
 
         /// <summary>A bubble disc was picked (editor click now, controller ray later).</summary>
         public event Action<string> BubbleSelected;
+        /// <summary>A plant pin was picked (pin_id). PinCard shows its photo; picking it again opens its bubble.</summary>
+        public event Action<string> PinSelected;
         /// <summary>Board resized (map arrived/changed). Attachments (buttons, camera screen) re-place.</summary>
         public event Action LayoutChanged;
 
@@ -59,6 +61,7 @@ namespace Understory
         const float Margin = 0.04f;
         const float DefaultSpan = 10f; // meters shown before the first /map
         const float SelectRadius = 0.06f; // on the board, meters
+        const float PinPickRadius = 0.025f; // ray-to-pin-head distance, meters
 
         Transform root, mapRoot;
         GameObject slab, floor, robot;
@@ -170,6 +173,24 @@ namespace Understory
         public bool TrySelect(Ray ray)
         {
             if (!visible || root == null) return false;
+
+            // Pins stand up off the board: pick by distance from the ray to each pin head.
+            string bestPin = null;
+            float bestPinD = PinPickRadius;
+            foreach (var kv in pins)
+            {
+                var head = kv.Value.transform.Find("Head");
+                if (head == null) continue;
+                float d = Vector3.Cross(ray.direction, head.position - ray.origin).magnitude;
+                if (d < bestPinD) { bestPinD = d; bestPin = kv.Key; }
+            }
+            if (bestPin != null)
+            {
+                Debug.Log($"[Tabletop] pin {bestPin}");
+                PinSelected?.Invoke(bestPin);
+                return true;
+            }
+
             var plane = new Plane(root.up, mapRoot.position);
             if (!plane.Raycast(ray, out float dist)) return false;
             var hit = mapRoot.InverseTransformPoint(ray.GetPoint(dist));
