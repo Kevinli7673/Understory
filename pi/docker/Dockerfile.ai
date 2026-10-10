@@ -1,0 +1,12 @@
+# scout-ros-ai: scout-ros plus CPU PyTorch, OWL-ViT (transformers) and BioCLIP (open_clip).
+# Runs the real detector + species nodes on a machine without a GPU (the Pi: about 3 s per frame).
+# On the Jetson use a CUDA build of PyTorch instead (see HANDOFF.md, "GPU environment").
+#
+#   docker build -t scout-ros-ai -f pi/docker/Dockerfile.ai pi/docker
+FROM scout-ros
+RUN apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
+RUN echo 'numpy<2' > /tmp/constraints.txt \
+ && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
+      --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+ && pip3 install --no-cache-dir --break-system-packages -c /tmp/constraints.txt \
+      transformers open_clip_torch

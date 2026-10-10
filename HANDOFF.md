@@ -1,0 +1,477 @@
+# Understory handoff: Pi + Jetson (perception, bringup, AI)
+
+Written Sat Oct 10 2026, last updated about 12:30 PM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
+
+This file is for Alvaro (perception lead) and for any coding agent picking the work up on either the
+Raspberry Pi or the Jetson Orin Nano. It covers what exists, what was tested and how, how to run it,
+what is left, and what was done in each working session. `AGENTS.md` is still the team contract for
+topic names and JSON shapes; this file does not replace it.
+
+If you are a coding agent: read sections 1 to 4, then go to section 7 (Jetson) or section 6 (Pi), and
+follow the rules in section 12.
+
+---
+
+## 1. Where things stand
+
+| Piece | State | How it was checked |
+| --- | --- | --- |
+| Pi sensors: `/scan` 10 Hz, `/camera/image/compressed` 15 Hz | Works | `scout_up.sh` health check, Sat 12:16 PM, after a power loss and reboot |
+| Mapping, Nav2, mission manager, panorama on the Pi | Works | `scout_up.sh --nav`: `/mission/state` `IDLE`, TF `map -> base_link` ok |
+| Quest endpoint `172.20.10.10:10000`, Foxglove `:8765` | Listening | port check. No headset has connected since the Quest ROS code was written |
+| Panorama node always sends the 12 frames | Works | `capture` on the Pi: 12 frames, bubble JSON, `CAPTURING -> IDLE` |
+| Detector, real model (OWL-ViT) | Works, slow on CPU | Pi CPU: about 0.25 Hz. GPU not tried |
+| Species ID (BioCLIP, 5 species) | Works | names 5 of 5 test photos at detector threshold 0.05 (now the default), embedding length is 512 |
+| Localizer: pins + readings | Works | 14 unit tests; live with real LiDAR + TF; self-test produces pins |
+| One command for the AI (`scout_ai_up.sh`) | Works on the Pi | started, `/detections` seen from the `scout` container |
+| Pi temperature with the AI running | **Too hot** | 83 °C and thermally throttled after 5 minutes (section 5) |
+| Jetson | **Nothing has run on it** | `jetson_up.sh` only passed a dry run on the Pi |
+| Pi and Jetson together | **Never tried** | |
+| Robot driving | **Not possible yet** | no ESP32 bridge in the repo, nothing consumes `/cmd_vel` |
+| `/sensors` from the ESP32 | **Does not exist** | `fake_sensors.py` stands in |
+| Whisper (`/voice/audio` -> `/voice/text`) | **Not written** | Quest already sends the audio (section 9) |
+| NanoOWL / TensorRT | Stub | speed upgrade only |
+| Logger, dashboard, Neon sync | Not in the repo | other owners |
+
+The short version: **the full perception chain now runs on the Pi alone, slowly.** A plant photo held
+in front of the camera becomes a pin about 12 to 15 seconds later. The Jetson's job is to run the same
+code faster, and to take mapping and navigation off the Pi.
+
+## 2. The project in one paragraph
+
+Understory (older name "Scout") is a field-survey robot for Knight Hacks IX. A mecanum robot drives
+through a staged habitat, maps it with a 2D LiDAR, takes 360° "bubble" photo spins, identifies plants
+(invasive: Brazilian pepper, air potato, cogongrass; native: saw palmetto, wild coffee) with
+open-source models, and shows the result in a Meta Quest 3 app and a web dashboard. Everything talks
+over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo must work with no internet.
+
+## 3. Machines and network
+
+| Machine | Role | Address |
+| --- | --- | --- |
+| Raspberry Pi 5 (on the robot) | LiDAR, camera, Foxglove, Quest endpoint. Can also run everything | `172.20.10.10`, user `a1vcm` |
+| Jetson Orin Nano (on the table, wall power) | Mapping, Nav2, mission, panorama, AI | needs a `172.20.10.x` address |
+| Quest 3 | Unity app | connects to **the Pi**, `172.20.10.10:10000` |
+
+- Hotspot: "Alvaro's iPhone". The Pi falls back to `eduroam2` if the phone is not in range at boot.
+  Fix: `sudo nmcli con up hotspot`.
+- **The Pi has no clock battery.** After a reboot on eduroam it came up 5 h 44 min slow, because NTP is
+  blocked there. TF between machines fails if clocks differ by more than a fraction of a second.
+  Check `date` after every reboot. Fix with internet:
+  `sudo date -u -s "$(curl -sI https://github.com | grep -i '^date:' | cut -d' ' -f2-)"`
+- Neither machine has ROS on the host. Everything runs in Docker:
+  - `scout` container, image `scout-ros`: ROS 2 Jazzy, slam_toolbox, Nav2, twist_mux, Foxglove. No PyTorch.
+  - `scout-ai` container, image `scout-ros-ai`: the same plus CPU PyTorch, transformers and open_clip.
+  - Both use `--net=host --ipc=host`, so nodes in one see nodes in the other.
+- Workspace: `~/fetch_ws` on the host is `/fetch_ws` in both containers. This repo is at
+  `~/fetch_ws/src/Understory`. The build is `--symlink-install`, so edited Python takes effect when the
+  node restarts. A new node or entry point needs a rebuild (section 13).
+- Only **one** `scout_nav.launch.py` (slam + Nav2 + mission) may run on the network: Pi or Jetson, never both.
+
+## 4. Where everything is
+
+| Thing | Path |
+| --- | --- |
+| Team contract | `AGENTS.md` |
+| Pi and Jetson run instructions | `pi/README.md` |
+| Pi start / stop / shell | `pi/scout_up.sh`, `pi/scout_down.sh`, `pi/scout_shell.sh` (symlinked into `~` on the Pi) |
+| AI start / stop | `pi/scout_ai_up.sh` (symlinked to `~/scout_ai_up.sh` on the Pi) |
+| Jetson start | `pi/jetson/jetson_up.sh` |
+| Launch files | `pi/scout_bringup.launch.py` (sensors), `pi/scout_nav.launch.py` (slam, Nav2, mission, panorama) |
+| Docker images | `pi/docker/Dockerfile` (`scout-ros`), `pi/docker/Dockerfile.ai` (`scout-ros-ai`) |
+| Perception package | `ros2_ws/src/scout_perception` |
+| Helper scripts | `pi/scripts/` |
+| Navigation + mission (mizbahh) | `ros2_ws/src/understory_nav`. **Not ours to edit** |
+| Quest app (Kevin) | `Unity/`, `fake_data/`, `tools/`. Newest work is on branch `quest-app` |
+| Splat pipeline (Kevin) | `splat/`. **Not ours to edit** |
+| Logs | `~/fetch_ws/logs/` (`bringup`, `nav`, `tcp_endpoint`, `detector`, `species`, `localizer`) |
+| Pin crops | `~/fetch_ws/missions/<mission_id>/crops/<pin_id>.jpg` |
+| Model cache | `~/.cache/huggingface` on the host, mounted into `scout-ai` |
+| Exported `scout-ros` image for the Jetson | `~/scout-ros-image.tar.gz` on the Pi, about 925 MB |
+
+### The perception package
+
+| File | What it is |
+| --- | --- |
+| `detector_node.py` | camera -> `/detections`. Parameters: `backend`, `prompts`, `score_threshold` |
+| `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (stub) |
+| `species_node.py` | `/detections` + camera -> `/species`. Parameters: `backend`, `min_confidence` (0.5), `max_boxes` (3) |
+| `species_backends.py` | `dummy`, `bioclip` |
+| `species_labels.py` | **The species list. Edit this to match the habitat.** Also the "not a plant" list |
+| `localizer_node.py` | `/species` + `/scan` + TF -> `/survey/pins`; `/sensors` -> `/survey/readings` |
+| `geometry.py` | bearing, LiDAR lookup, map projection, pin de-duplication. No ROS imports |
+| `test/test_geometry.py` | 14 unit tests for `geometry.py` |
+| `panorama_node.py` | `/survey/capture` -> 12 frames + bubble JSON + `capture_done`, pano as an extra |
+
+## 5. How the AI chain works
+
+```
+/camera/image/compressed ──> detector_node ──> /detections ──> species_node ──> /species ──> localizer_node ──> /survey/pins
+                                (OWL-ViT)       "a plant" boxes    (BioCLIP)     named plant      + /scan + TF      + crop .jpg
+/sensors (ESP32 bridge) ───────────────────────────────────────────────────────────────────> localizer_node ──> /survey/readings
+```
+
+1. **Detector** finds plant-like things with general prompts ("a plant", "a leaf", "a tree", ...). It
+   does not name species. It drops frames it cannot keep up with.
+2. **Species node** cuts each box out of the exact frame it came from (matched by timestamp) and asks
+   BioCLIP to pick from the fixed list in `species_labels.py`. The list also holds non-plant entries
+   ("a photo of a wall", "a photo of a hand", ...). If one of those wins, or confidence is under
+   `min_confidence`, nothing is published. This removed a false "cogongrass" on a ceiling decoration.
+3. **Localizer** turns the box centre into a direction (camera yaw from TF + pinhole angle from
+   `hfov`), reads the LiDAR range in that direction, and projects it into the map from TF
+   `map -> base_link`. Sightings of the same label within 0.5 m merge into one pin. A pin is published
+   after 3 sightings, and again if a later sighting is at least 0.05 more confident.
+
+### Message shapes
+
+`/detections` (in `AGENTS.md` by name only):
+
+```json
+{"t": 1791600000.12, "frame_id": "camera", "boxes": [{"label": "a plant", "score": 0.16, "xyxy": [317, 144, 546, 454]}]}
+```
+
+`/species`, **proposed, not yet agreed with the team or written into `AGENTS.md`**. One message per box:
+
+```json
+{"t": 1791600000.12, "frame_id": "camera", "label": "air potato", "invasive": true,
+ "confidence": 0.98, "xyxy": [317, 144, 546, 454], "embedding": [512 floats]}
+```
+
+`/survey/pins` and `/survey/readings` follow `AGENTS.md` exactly. Details that are not in the contract:
+
+- Pin `yaw` is the direction of the plant from its bubble's centre, in the map frame. That is how
+  Kevin's `Pin` class documents it.
+- Pin `bubble_id` is the bubble being captured when the plant was seen, else the nearest known bubble,
+  else `""` if no bubble exists yet. **Kevin should confirm the Quest copes with an empty `bubble_id`.**
+- Pins carry no `embedding`. `-p publish_embedding:=true` on the localizer adds it. This is an open
+  question with the dashboard owner, whose similar-plant search needs it.
+- Readings: null values are dropped, `t` is added if the ESP32 did not send one.
+
+### Measured on the Pi 5 CPU (2 PyTorch threads, mapping and Nav2 running)
+
+| Step | Time |
+| --- | --- |
+| OWL-ViT, one 640x480 frame | about 3.2 s alone, about 4 s with the rest of the stack |
+| BioCLIP, one crop | about 1.0 s |
+| `/detections` rate | 0.21 to 0.25 Hz |
+| Model load, cached | about 5 s each. First download: about 3 minutes each on the hotspot |
+| Pi while the AI runs | load 7 to 10 on 4 cores, `/scan` and camera still at full rate |
+| Pi temperature | 71 °C at first, **83 °C after about 5 minutes**, `vcgencmd get_throttled` = `0xe0008` (soft temperature limit active) |
+
+### Known weaknesses
+
+- **The Pi overheats when it runs the AI.** It reached 83 °C and the firmware started slowing the
+  CPU. It has no fan. Run the AI on the Pi only for short tests (`~/scout_ai_up.sh --stop` after),
+  or add a fan. The AI is left **stopped** on the Pi. This is one more reason to move it to the Jetson.
+- **Cogongrass and wild coffee score low in the detector** (0.05 to 0.08), because in a photo they
+  look like plain grass and plain leaves. At threshold 0.07 the self-test named 3 or 4 of the 5
+  photos; at 0.05 it named all 5, cogongrass with confidence 0.58 and the rest at 1.0. The default
+  is now 0.05. On the live camera at 0.05, in a room with no plants, the detector produced two weak
+  boxes in 45 s and the species node rejected both, so no false pin appeared. That is one short
+  check, not a guarantee: watch `localizer.log` for false pins in the real habitat.
+- BioCLIP always picks its best of 5 species plus the non-plant list. A plant that is not in the list
+  gets the nearest listed name, sometimes confidently.
+- Distance is the LiDAR range at LiDAR height. A photo held in the air above the LiDAR plane gets the
+  distance of whatever is behind it at LiDAR height.
+- `hfov` is 0.83 rad, computed from the camera spec, not measured. The TF offsets for `laser` and
+  `camera` in `pi/scout_bringup.launch.py` are placeholders. Pins are rough until both are measured.
+  The localizer reads the offsets from TF, so fixing the launch file fixes the pins.
+- With the robot unable to move, the map pose still turns during a `capture`, because odometry is
+  dead-reckoned from `/cmd_vel`. Pins seen during that fake spin land in the wrong direction.
+
+## 6. Running on the Pi
+
+```bash
+# after any reboot: plug in LiDAR + camera, then
+sudo nmcli con up hotspot && date        # must show 172.20.10.10 and the right time
+~/scout_up.sh --nav                      # sensors + Foxglove + Quest endpoint + mapping + Nav2 + mission + panorama
+~/scout_ai_up.sh                         # real plant AI, slow
+~/scout_ai_up.sh --fake-sensors          # same, plus fake /sensors so /survey/readings flows
+tail -f ~/fetch_ws/logs/localizer.log    # pins appear here
+
+~/scout_ai_up.sh --stop                  # stop the AI only
+~/scout_down.sh --keep                   # stop all ROS, keep the containers
+```
+
+When the Jetson takes over mapping and AI, the Pi runs sensors only: `~/scout_down.sh --keep && ~/scout_up.sh`.
+
+Test the AI with no plant and no robot (runs on ROS domain 43, invisible to the Quest):
+
+```bash
+pi/scripts/ai_selftest.sh                # uses ~/fetch_ws/test_plants/*.jpg, prints pins and PASS/FAIL
+~/scout_ai_up.sh                         # the self-test stops the live AI nodes; start them again
+```
+
+`~/fetch_ws/test_plants/` on the Pi holds five Wikipedia photos, one per species. They are not in the
+repo (their licences need attribution). Any `.jpg` photos of the listed plants work.
+
+## 7. Bringing up the Jetson
+
+Nothing below has been run on the Jetson. Treat every statement about it as an assumption.
+
+### Step 0: look before touching (read-only)
+
+```bash
+cat /etc/nv_tegra_release; lsb_release -a; uname -m; free -h; df -h ~
+docker --version; docker info | grep -i runtime; docker ps
+hostname -I; date; python3 --version; git --version
+python3 -c "import torch; print(torch.__version__, torch.cuda.is_available())"
+```
+
+Needed: a `172.20.10.x` address, `date` matching the Pi to the second, `docker ps` working without sudo
+(`sudo usermod -aG docker $USER`, then log out and in), and about 10 GB free disk.
+
+### Step 1: one-time setup
+
+```bash
+scp a1vcm@172.20.10.10:scout-ros-image.tar.gz ~/          # or carry it on a USB stick
+gunzip -c ~/scout-ros-image.tar.gz | docker load
+
+mkdir -p ~/fetch_ws/src && cd ~/fetch_ws/src
+git clone https://github.com/Kevinli7673/Understory.git
+cd Understory && git checkout perception-pins     # only until PR #2 is merged into main
+```
+
+**The AI code and this file are on branch `perception-pins` (PR #2), not yet on `main`.** Check with
+`git log --oneline -1 origin/main`; once PR #2 is merged, stay on `main`.
+
+### Step 2: start it
+
+```bash
+# Pi: sensors only, so only one slam_toolbox exists. This drops the Quest connection for about 30 s
+~/scout_down.sh --keep && ~/scout_up.sh
+# Jetson
+~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+```
+
+`jetson_up.sh` builds the workspace, checks it can see the Pi's `/scan`, starts mapping + Nav2 +
+mission + panorama, then calls `scout_ai_up.sh`. On the first run that builds the `scout-ros-ai`
+image (about 5 minutes) and downloads the two models (about 1 GB). Both need internet once. After
+that it runs offline.
+
+A good run prints `/scan` near 10 Hz, `/mission/state: IDLE`, `TF map -> base_link: ok`, the camera
+near 15 Hz, and `/detections: publishing`.
+
+**This default uses the CPU image, not the GPU.** It is the same code that works on the Pi, so it is
+the safe first target. Expect roughly Pi speed. `NO_AI=1 jetson_up.sh` skips the AI.
+
+If the Jetson cannot see `/scan`:
+1. Confirm the Pi is running `~/scout_up.sh`.
+2. The hotspot may be dropping multicast. Point each machine at the other (never tested):
+   - Pi: `~/scout_down.sh --keep && SCOUT_PEER=<Jetson IP> ~/scout_up.sh`
+   - Jetson: `SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh`
+3. Next fallback in `AGENTS.md` is `rmw_zenoh`, already in the image. After that, plug the LiDAR and
+   camera into the Jetson and run `scout_up.sh --nav` there.
+
+If the Jetson misbehaves at any point, the Pi alone is the fallback: `~/scout_up.sh --nav && ~/scout_ai_up.sh`.
+
+### Step 3: GPU (the reason the Jetson is here)
+
+The code already picks `cuda` when `torch.cuda.is_available()` is true; nothing in the nodes changes.
+What is missing is a container where that is true **and** ROS 2 Jazzy works. `scout_ai_up.sh` takes
+the image and runtime from the environment:
+
+```bash
+AI_IMAGE=<your cuda image> AI_RUNTIME=nvidia ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+```
+
+The image must contain: ROS 2 Jazzy with `rclpy`, `tf2_ros`, `sensor_msgs`, `python3-opencv`; PyTorch
+built for this JetPack with CUDA; `torchvision`, `transformers`, `open_clip_torch`; `numpy<2`. Routes,
+in the order to try them:
+
+1. **`FROM scout-ros` plus NVIDIA's Jetson PyTorch wheel**, run with `--runtime nvidia`. Copy
+   `pi/docker/Dockerfile.ai`, swap the CPU `torch`/`torchvision` install for the wheel matching the
+   JetPack version from step 0. Smallest change. Risk: the wheel wants the host's CUDA libraries,
+   which the nvidia runtime mounts on some JetPack versions and not others, and the wheel's Python
+   version must match the image's (3.12).
+2. **A `dusty-nv/jetson-containers` image with PyTorch and ROS 2.** If its ROS is Humble rather than
+   Jazzy, `String` and `CompressedImage` usually cross over, but that pairing is unsupported. Test
+   one `ros2 topic echo /camera/image/compressed --once` before building on it.
+3. **Models in a plain GPU Python process, thin ROS node in `scout`** talking to it over a local
+   socket. Use this if ROS inside the GPU container turns into a fight.
+
+Check each of these before trusting it: `torch.cuda.is_available()` is true inside the container; a
+node in it receives `/camera/image/compressed`; `tegrastats` shows GPU load and memory headroom (8 GB
+is shared between CPU and GPU, and mapping + Nav2 are already using some). Then run
+`pi/scripts/ai_selftest.sh` and record the `/detections` rate for the pitch.
+
+Write the working recipe down as `pi/jetson/Dockerfile.gpu` so it can be rebuilt.
+
+## 8. What the Quest app needs from us (Kevin)
+
+Kevin's app is in `Unity/`. On `main`: bubble ring view, tabletop map, view switching, fake missions.
+On branch `quest-app`, compiling but **not yet tested against ROS or on the headset**: live ROS
+subscriptions, stick driving, e-stop, mission buttons, before/after overlay, sensor heat map, pin
+photo cards, push-to-talk.
+
+| Quest subscribes to | Who publishes it | State |
+| --- | --- | --- |
+| `/map`, `/pose`, `/mission/state` | slam_toolbox, mission manager | live with `--nav` |
+| `/camera/image/compressed` | Pi camera | live |
+| `/survey/bubbles`, `/survey/bubble_images` | panorama node | live; frames always sent now |
+| `/survey/pins`, `/survey/readings` | localizer | live when `scout_ai_up.sh` runs |
+
+| Quest publishes | Who consumes it | State |
+| --- | --- | --- |
+| `/cmd_vel_teleop`, `/estop` | twist_mux | wired, but nothing drives the motors |
+| `/voice/text` (panel buttons) | mission manager | works |
+| `/voice/audio` (hold X) | Whisper node | **node not written** |
+
+His two requests in `AGENTS.md`:
+1. *Always publish the frames; pano optional.* **Done.** Frames go out first, then the bubble JSON
+   and `capture_done`, then stitching runs. If it works, `<bubble_id>/pano` follows and the bubble
+   JSON is re-sent with `"stitched": true`.
+2. *`/voice/audio` = `std_msgs/UInt8MultiArray` holding a complete WAV file, 16 kHz mono 16-bit.*
+   Not answered yet. It is a reasonable format; the Whisper node in section 9 assumes it.
+
+Things to tell Kevin:
+- The Quest must point at the **Pi** (`172.20.10.10`), not the Jetson. His notes say Jetson.
+- For steady fake bubbles, pins and readings: `python3 /fetch_ws/scripts/fake_survey.py --mission m1`
+  inside the `scout` container. Do not run it together with the real AI.
+- Ignore test data from Saturday morning: bubble `m1-b01` and pins `m1-p01` to `m1-p15` were
+  published around 11:47 AM from dummy backends.
+
+## 9. What is left, in order
+
+1. **Jetson steps 0 to 2** (section 7). Settles the two-machine question, the largest untested risk.
+2. **Quest against the live Pi.** First real test of Kevin's ROS code. Needs only the Pi.
+3. **Hold real plant photos in front of the camera** with `scout_ai_up.sh` running (short runs on
+   the Pi: it overheats). Tune
+   `DETECTOR_THRESHOLD`, `min_confidence` and `species_labels.py` to the actual habitat.
+4. **Jetson GPU** (section 7, step 3).
+5. **Agree `/species`, pin `embedding` and `/voice/audio`** with the team, then update `AGENTS.md`.
+6. **As soon as the ESP32 bridge exists:** first drive, first real spin, `angular_scale` calibration,
+   a bubble from real rotated frames (run `pi/scripts/camera_lock.sh` first; check the 12 yaws step
+   by about 0.52 rad). Stop `fake_sensors.py` once the real `/sensors` is there.
+7. **Saturday night:** one full recorded mission as the fallback `AGENTS.md` asks for.
+8. **Whisper node** (`whisper_node` in `scout_perception`): subscribe `/voice/audio`
+   (`UInt8MultiArray`, bytes are a WAV file), decode with the `wave` module, run `small.en`, publish
+   lower-case text on `/voice/text`. The mission manager acts on `start`, `stop`, `return`, `manual`,
+   `capture`, `resume`. Lowest priority: the Quest panel buttons already publish those words.
+9. **NanoOWL + TensorRT**, and a PyTorch-versus-TensorRT speed number for the pitch.
+
+Waiting on teammates:
+- **Hardware (Teammate 4):** ESP32 serial bridge (`/cmd_vel` in as plain `Twist`, `/sensors` JSON
+  out, motors stop after 300 ms without a command, use the `/dev/serial/by-id/` name because the
+  LiDAR is also USB serial). Measured LiDAR and camera offsets. The logger node.
+- **mizbahh:** `angular_scale` once wheels turn; the single-survey-point question from simulation;
+  camera frame name (`camera_link` in her launch, `camera` in ours).
+- **Fullstack:** build against `fake_survey.py`; embedding size is confirmed as 512.
+
+## 10. Decisions Alvaro still has to make
+
+- `/species` shape (section 5): get the team to agree, then add it to `AGENTS.md`.
+- Pin `embedding`: in or out of the published pin.
+- `/voice/audio` format: accept Kevin's proposal or not.
+- `AGENTS.md` says "code freeze Sun 11 AM; submit by 9:30 AM". One of those is wrong.
+
+## 11. Session log
+
+What was asked in each working session with Claude Code, and what was done.
+
+**Session 1, Fri night, Pi bringup.** Asked for the seven Pi tasks in the original brief. Fixed the
+camera launch (device path was not resolved, brightness forced to 50). Started the Quest endpoint.
+Wrote `scout_up.sh`, `scout_down.sh`, `scout_shell.sh`, `camera_lock.sh`, `save_frames.py`,
+`record_bag.sh`, `fake_survey.py`. Created `scout_perception` with a dummy detector and the panorama node.
+
+**Session 2, Sat early morning, teammate code and Jetson kit.** Cloned the team repo and built
+`understory_nav` (its 10 tests pass). Proved the mission-to-panorama handshake. Wrote
+`pi/scout_nav.launch.py` because the teammate's launch file targets Humble: on Jazzy slam_toolbox
+needs lifecycle activation, twist_mux defaults to `TwistStamped`, and Nav2 plugin names use `::`.
+Rebuilt the image with Nav2 and exported it. Ran a simulated survey end to end. Added
+`scout_up.sh --nav`. Wrote `jetson_up.sh`. Moved the Pi code into the repo and merged it as PR #1.
+
+**Session 3, Sat morning, rundown.** Asked for a full written summary. Wrote `~/SCOUT_RUNDOWN.md` on the Pi.
+
+**Session 4, Sat morning, Jetson brief.** Asked for paste-in instructions for the Jetson. Wrote
+`~/JETSON_BRIEF.md` on the Pi. This file supersedes both.
+
+**Session 5, Sat 11 AM to 12 PM, this handoff.** It ended when the Pi lost power mid-test.
+- *"Refer to old chats, what is next, is the Pi good, check the Unity progress."* Found the Pi
+  rebooted with no sensors plugged in, on eduroam, no ROS running, and the clock 5 h 44 min slow.
+  Fixed the clock. Reviewed Kevin's 11 commits and his two requests. Fast-forwarded the Pi's clone.
+- *"Make all the changes, you may push, write a handoff in the repo."* With LiDAR and camera plugged
+  back in: switched to the hotspot and restarted the stack. Changed the panorama node to always send
+  frames. Wrote the real OWL-ViT backend, the species node with BioCLIP, the localizer with its
+  geometry module and 14 tests, `fake_sensors.py`, `Dockerfile.ai`, `scout_ai_up.sh`,
+  `ai_selftest.sh`. Made `jetson_up.sh` start the AI and `scout_down.sh` stop it. Tested all of it
+  on the Pi. Wrote this file.
+- Found and fixed along the way: OWL-ViT box heights were scaled by the image width (boxes ran off
+  the bottom of the frame); a non-plant ceiling decoration was named cogongrass until the "not a
+  plant" list was added; a 12-frame burst at 50 ms spacing overflowed a slow subscriber, so frames
+  are now 150 ms apart.
+- Installed `transformers` and `open_clip_torch` into `~/cv-env` on the Pi host for quick model tests.
+
+**Session 6, Sat 12:10 PM, resume after the Pi lost power.** *"Resume from our last chat; the Pi
+disconnected midway through your camera testing. Hotspot, LiDAR and cameras are connected. Remember
+to document the changes for the Jetson handoff."*
+- Nothing was lost: all of session 5's work was still on disk, uncommitted, on branch
+  `perception-pins`. Recovered the context from the saved session transcript.
+- Checked the Pi after the reboot: on the hotspot at `172.20.10.10`, clock correct to within a few
+  seconds of GitHub's, LiDAR and Brio camera both present, containers running.
+- Restarted with `~/scout_up.sh --nav`: `/scan` 10.7 Hz, camera 15.0 Hz, `/mission/state` `IDLE`,
+  TF `map -> base_link` ok, ports 10000 and 8765 listening.
+- Rebuilt the workspace; 14 `scout_perception` tests and 10 `understory_nav` tests pass.
+- Finished the test that was cut off: `ai_selftest.sh` at threshold 0.05 named all 5 species and
+  made 5 pins. Made 0.05 the default in `scout_ai_up.sh` and `ai_selftest.sh`.
+- Ran the real AI on the live camera for a few minutes: `/detections` publishing at about 0.3 Hz,
+  no false species or pins. The camera was pointing up at the building and was partly covered, so
+  **no real plant has been in front of the live camera yet** (section 9, item 3).
+- Found the Pi overheating with the AI on (83 °C, throttled). Stopped the AI nodes. Sensors,
+  mapping, Nav2, mission and panorama were left running.
+- Committed and pushed the work to branch `perception-pins` and opened PR #2 into `main`. The PR is
+  **not merged**: Alvaro or Kevin has to merge it.
+
+## 12. Rules for anyone (or any agent) continuing
+
+- **Commits carry no Claude attribution.** No `Co-Authored-By`, no "Generated with" footer. Commit
+  under the configured git identity.
+- Topic names and JSON keys must match `AGENTS.md` exactly. Change the contract only with team agreement.
+- Do not edit `ros2_ws/src/understory_nav`, `splat/` or `Unity/`. If something there blocks you, say what and why.
+- Never publish on `/cmd_vel`, `/cmd_vel_auto`, `/cmd_vel_teleop` or `/estop` by hand. The mission
+  manager publishing during a `capture` test is fine.
+- Never `apt install` or `pip install` into a running container; it is lost on recreate. Put it in a Dockerfile.
+- Never commit secrets. Tokens go in `.env`, which is git-ignored.
+- No reflashing, no `apt upgrade`, nothing that could leave a machine unbootable, without asking.
+- One ROS node per job. Python. Match the style of the existing `scout_perception` files.
+- Check each change with real output before calling it done. If something is untested, say so.
+- Keep every fallback working: Pi alone must always be able to run the demo.
+
+To start a coding agent on the Jetson: open it in `~/fetch_ws/src/Understory` and say
+*"Read HANDOFF.md and AGENTS.md, then do section 7 from step 0 and report after each step."*
+
+## 13. Cheat sheet
+
+```bash
+# ---- Pi host ----
+~/scout_up.sh                 # sensors + Foxglove + Quest endpoint
+~/scout_up.sh --nav           # the above + mapping, Nav2, mission, panorama
+~/scout_ai_up.sh              # plant AI (add --fake-sensors, or --stop)
+~/scout_down.sh --keep        # stop ROS, keep containers
+~/scout_shell.sh              # sourced ROS shell in the scout container
+sudo nmcli con up hotspot     # if it fell back to eduroam
+date                          # check after every reboot
+
+# ---- Jetson host ----
+~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+NO_AI=1 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+AI_IMAGE=<cuda image> AI_RUNTIME=nvidia ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+tegrastats
+
+# ---- inside the scout container ----
+ros2 topic pub --once /voice/text std_msgs/msg/String 'data: capture'    # also: start stop return manual resume
+ros2 topic echo /mission/state
+ros2 topic echo /survey/pins
+python3 /fetch_ws/scripts/fake_survey.py --mission m1 --rate 1
+python3 /fetch_ws/scripts/fake_sensors.py
+/fetch_ws/scripts/camera_lock.sh                                          # --auto to undo
+
+# ---- rebuild after adding a node, and run the unit tests ----
+cd /fetch_ws && colcon build --symlink-install --packages-select understory_nav scout_perception
+cd /fetch_ws/src/Understory/ros2_ws/src/scout_perception && python3 -m pytest -q test
+
+# ---- tune the AI without editing code ----
+DETECTOR_THRESHOLD=0.08 ~/scout_ai_up.sh          # after ~/scout_ai_up.sh --stop. Default 0.05; raise it if junk gets pinned
+DETECTOR_BACKEND=dummy SPECIES_BACKEND=dummy ~/scout_ai_up.sh             # plumbing only, no models
+```

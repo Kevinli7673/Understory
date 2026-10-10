@@ -97,3 +97,4 @@ done
 # files the container creates are root-owned; hand them back to the host user
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs
 echo "Done. Quest: ROS IP 172.20.10.10 port 10000 | Foxglove: ws://172.20.10.10:8765 | shell: ~/scout_shell.sh"
+echo "Plant AI on this machine (slow on the Pi, about 1 frame every 4 s): ~/scout_ai_up.sh"
