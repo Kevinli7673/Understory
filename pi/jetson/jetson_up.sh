@@ -8,7 +8,8 @@
 #   ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 #   SCOUT_PEER=172.20.10.10 .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
 #   NO_AI=1 .../jetson_up.sh                        # mapping + mission only, no plant AI
-#   AI_IMAGE=<cuda image> AI_RUNTIME=nvidia .../jetson_up.sh   # GPU build of the AI container (HANDOFF.md)
+#   The plant AI uses the image scout-ros-ai-gpu when it exists (build: pi/jetson/Dockerfile.gpu, HANDOFF.md),
+#   with AI_ONE_PROCESS=1 and WHISPER_MODEL=none. Set AI_IMAGE / AI_RUNTIME / AI_ONE_PROCESS= / WHISPER_MODEL to override.
 
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
@@ -87,6 +88,12 @@ done
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs /fetch_ws/build /fetch_ws/install /fetch_ws/log 2>/dev/null
 # --- 7. plant AI: detector + species + localizer in the scout-ai container (NO_AI=1 skips it) ---
 if [ -z "$NO_AI" ]; then
+  # Jetson defaults (set any of them yourself to override): the GPU image if it has been built, both
+  # models in one process, and no Whisper here - it runs on the Pi (~/scout_ai_up.sh --voice-only).
+  if [ -z "$AI_IMAGE" ] && docker image inspect scout-ros-ai-gpu >/dev/null 2>&1; then
+    export AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=${AI_RUNTIME:-nvidia}
+  fi
+  export AI_ONE_PROCESS=${AI_ONE_PROCESS-1} WHISPER_MODEL=${WHISPER_MODEL:-none}
   "$(dirname "$(readlink -f "$0")")/../scout_ai_up.sh"
 fi
 echo "Done. Stop with: docker exec scout pkill -INT -f 'ros2 launch'; $(dirname "$(readlink -f "$0")")/../scout_ai_up.sh --stop"

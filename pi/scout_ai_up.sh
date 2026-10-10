@@ -7,6 +7,7 @@
 #   ~/scout_ai_up.sh             start (safe to re-run; anything already running is left alone)
 #   ~/scout_ai_up.sh --stop      stop the AI nodes (the container stays)
 #   ~/scout_ai_up.sh --fake-sensors   also publish fake /sensors, until the ESP32 bridge exists
+#   ~/scout_ai_up.sh --voice-only     only the Whisper node (the Pi, when the Jetson runs the plant AI)
 #
 # Settings (environment variables):
 #   AI_IMAGE=scout-ros-ai        Docker image. Default is the CPU build (pi/docker/Dockerfile.ai).
@@ -43,7 +44,8 @@ if [ "$1" = "--stop" ]; then
 fi
 
 # --- 1. image + container (--init reaps stopped nodes; as zombies, pgrep would report them still running) ---
-if ! docker image inspect "$AI_IMAGE" >/dev/null 2>&1; then
+# the image only matters when the container has to be created; a running one is used as it is
+if [ "$(docker inspect -f '{{.State.Running}}' scout-ai 2>/dev/null)" != "true" ] && ! docker image inspect "$AI_IMAGE" >/dev/null 2>&1; then
   if [ "$AI_IMAGE" = scout-ros-ai ] && docker image inspect scout-ros >/dev/null 2>&1; then
     echo "Building $AI_IMAGE (one time, needs internet, about 5 minutes)..."
     docker build -t scout-ros-ai -f "$HERE/docker/Dockerfile.ai" "$HERE/docker" || exit 1
@@ -78,13 +80,15 @@ start() {   # start <process pattern> <log name> <command>
   echo "Starting $2..."
   docker exec -d $PEER scout-ai bash -c "$SRC && $OFFLINE $3 > /fetch_ws/logs/$2.log 2>&1"
 }
-if [ -n "$AI_ONE_PROCESS" ]; then
+if [ "$1" = "--voice-only" ]; then
+  :
+elif [ -n "$AI_ONE_PROCESS" ]; then
   start ai_node ai "ros2 run scout_perception ai_node --ros-args -p detector_node:backend:=$DET -p detector_node:score_threshold:=$THRESH -p species_node:backend:=$SPEC"
 else
   start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH"
   start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC"
 fi
-start localizer_node localizer "ros2 run scout_perception localizer_node"
+[ "$1" = "--voice-only" ] || start localizer_node localizer "ros2 run scout_perception localizer_node"
 if [ "$WHISPER" != none ]; then
   # Whisper has its own offline switch, so a missing voice model never forces the plant models online
   PLANT_OFFLINE=$OFFLINE; OFFLINE=
@@ -96,6 +100,7 @@ fi
 [ "$1" = "--fake-sensors" ] && start fake_sensors.py fake_sensors "python3 /fetch_ws/src/Understory/pi/scripts/fake_sensors.py"
 
 # --- 4. health check ---
+if [ "$1" != "--voice-only" ]; then
 echo "Waiting for the models to load (up to 3 minutes the first time)..."
 for i in $(seq 36); do
   grep -q 'detector running' "$HOME/fetch_ws/logs/$DLOG.log" 2>/dev/null &&
@@ -107,18 +112,28 @@ for i in $(seq 36); do
   sleep 5
 done
 # one message is enough: on a CPU the detector manages a frame every few seconds, too slow for `ros2 topic hz`
-if in_ai "timeout 60 ros2 topic echo /detections std_msgs/msg/String --once" >/dev/null 2>&1; then
+det_ok=
+for i in 1 2 3; do   # the first try can fail at once while the models are still warming up; errors go to ai_check.log
+  in_ai "timeout 20 ros2 topic echo /detections std_msgs/msg/String --once" >/dev/null 2>>"$HOME/fetch_ws/logs/ai_check.log" && { det_ok=1; break; }
+  echo "try $i failed at $(date +%T)" >>"$HOME/fetch_ws/logs/ai_check.log"; sleep 3
+done
+if [ -n "$det_ok" ]; then
   echo "  /detections: publishing"
 else warn "/detections is NOT publishing (see ~/fetch_ws/logs/$DLOG.log; is the camera up?)"; fi
 docker exec scout-ai pgrep -f species_node >/dev/null && echo "  species node: running" || warn "species node is NOT running"
 docker exec scout-ai pgrep -f localizer_node >/dev/null && echo "  localizer: running" || warn "localizer is NOT running"
+else
+  for i in $(seq 30); do grep -q 'whisper node running' "$HOME/fetch_ws/logs/whisper.log" 2>/dev/null && break; sleep 3; done
+fi
 if [ "$WHISPER" != none ]; then
   if grep -q 'whisper node running' "$HOME/fetch_ws/logs/whisper.log" 2>/dev/null; then echo "  voice (whisper): running"
   elif docker exec scout-ai pgrep -f whisper_node >/dev/null; then echo "  voice (whisper): still loading or downloading, see ~/fetch_ws/logs/whisper.log"
   else warn "whisper node is NOT running. See ~/fetch_ws/logs/whisper.log"; fi
 fi
-echo "  /species and /survey/pins only appear while a listed plant is in view. Watch them with:"
-echo "    tail -f ~/fetch_ws/logs/localizer.log"
+if [ "$1" != "--voice-only" ]; then
+  echo "  /species and /survey/pins only appear while a listed plant is in view. Watch them with:"
+  echo "    tail -f ~/fetch_ws/logs/localizer.log"
+fi
 docker exec scout-ai chown -R "$(id -u):$(id -g)" /fetch_ws/logs 2>/dev/null
 docker exec scout-ai bash -c "[ -d /fetch_ws/missions ] && chown -R $(id -u):$(id -g) /fetch_ws/missions" 2>/dev/null
 echo "Done. Stop with: $0 --stop"

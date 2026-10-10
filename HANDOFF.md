@@ -513,9 +513,10 @@ installed on it."*
   camera 15.0 Hz on the Jetson with Nav2 and the AI running, over ten minutes of checks.
 - **Whisper is back on the Pi.** On the Jetson, a voice clip arriving while the plant AI ran took
   available memory under 700 MB and the guard killed the AI. The Pi is idle in sensors-only mode and
-  transcribes a clip in about 6 s. Jetson: `WHISPER_MODEL=none`. Pi, after `~/scout_up.sh`:
-  `docker exec -d scout-ai bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash && export HF_HUB_OFFLINE=1 && ros2 run scout_perception whisper_node --ros-args -p model:=openai/whisper-base.en > /fetch_ws/logs/whisper.log 2>&1"`
-  Without Whisper the Jetson keeps about 1.3 GB available with Firefox open.
+  transcribes a clip in about 6 s. `scout_ai_up.sh --voice-only` starts only the Whisper node; it is
+  new in this branch and the Pi's copy does not have it yet, so at 3:36 PM the node was started on the
+  Pi by hand with `docker exec -d scout-ai ... ros2 run scout_perception whisper_node`. **It does not
+  come back after a Pi reboot.** Without Whisper the Jetson keeps about 1.3 GB available with Firefox open.
 - **Quest app checked without a headset** (Kevin's branch `quest-app`, not merged into this one).
   `pi/scripts/quest_probe.py` connects to the Pi's ROS-TCP-Endpoint the way the app does, with the same
   topics and types as `Unity/Assets/Scripts/Ros`. Through `172.20.10.10:10000` it received
@@ -523,13 +524,16 @@ installed on it."*
   back on `/voice/text` 6.3 s later and reached `mission_manager` on the Jetson. Two things for Kevin:
   - **`/pose` sent nothing while the robot stood still.** slam_toolbox publishes it only after a scan
     update, so the app has no robot position until the robot first moves.
-  - `/survey/*` were silent because no capture ran during the probe. Not tested: teleop and e-stop
-    (the probe never publishes them), and a real headset.
-- `scout_ai_up.sh` twice printed "/detections is NOT publishing" while `/detections` was at 9 Hz
-  seconds later. The check is wrong somewhere; not found yet.
+  - A `capture` (3:53 PM, robot standing still, test bubble `m1-b01` on the live network) reached the
+    probe: the bubble JSON and 12 frames on `/survey/bubble_images`. Pins and readings were not seen
+    (no listed plant in view, no `/sensors`). Not tested: teleop and e-stop (the probe never publishes
+    them), and a real headset.
+- `scout_ai_up.sh` printed "/detections is NOT publishing" while `/detections` was at 9 Hz moments
+  later. In the 40 s after the models load a new subscriber gets nothing (cause not found), so the
+  check now tries three times. It also no longer builds the CPU image when `scout-ai` is already running.
 - Left running at 3:40 PM. Pi: sensors, endpoint, Foxglove, Whisper. Jetson: mapping, Nav2, mission,
-  panorama, `ai_node`, localizer. Start the Jetson side with
-  `AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia AI_ONE_PROCESS=1 WHISPER_MODEL=none pi/jetson/jetson_up.sh`.
+  panorama, `ai_node`, localizer. Start the Jetson side with `pi/jetson/jetson_up.sh`; on the Jetson it
+  now defaults to the GPU image, one process and no Whisper.
 - Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
 
 ## 12. Rules for anyone (or any agent) continuing
