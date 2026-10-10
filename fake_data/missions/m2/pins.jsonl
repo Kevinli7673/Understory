@@ -1,0 +1,5 @@
+{"pin_id": "m2-p01", "mission_id": "m2", "bubble_id": "m2-b01", "label": "American beautyberry", "invasive": false, "confidence": 0.65, "yaw": -1.3, "x": 0.5, "y": -1.8, "crop": "m2-p01.jpg"}
+{"pin_id": "m2-p02", "mission_id": "m2", "bubble_id": "m2-b01", "label": "Coontie", "invasive": false, "confidence": 0.9, "yaw": 2.702, "x": -1.7, "y": 0.8, "crop": "m2-p02.jpg"}
+{"pin_id": "m2-p03", "mission_id": "m2", "bubble_id": "m2-b03", "label": "Cogongrass", "invasive": true, "confidence": 0.71, "yaw": 1.599, "x": 4.95, "y": 3.0, "crop": "m2-p03.jpg"}
+{"pin_id": "m2-p04", "mission_id": "m2", "bubble_id": "m2-b03", "label": "Saw palmetto", "invasive": false, "confidence": 0.64, "yaw": -1.292, "x": 5.8, "y": -1.6, "crop": "m2-p04.jpg"}
+{"pin_id": "m2-p05", "mission_id": "m2", "bubble_id": "m2-b04", "label": "Wild coffee", "invasive": false, "confidence": 0.71, "yaw": 0.261, "x": 4.0, "y": 2.4, "crop": "m2-p05.jpg"}

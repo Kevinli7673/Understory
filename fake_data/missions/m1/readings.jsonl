@@ -1,0 +1,77 @@
+{"mission_id": "m1", "t": 1791600001.0, "x": 0.0, "y": 0.0, "temp_c": 24.2, "pressure_hpa": 1013.4, "soil_moisture": 343, "light": 336, "sound": 48, "uv": 0.27, "air_quality": 106}
+{"mission_id": "m1", "t": 1791600003.0, "x": 0.0, "y": 0.0, "temp_c": 23.9, "pressure_hpa": 1013.3, "soil_moisture": 340, "light": 344, "sound": 46}
+{"mission_id": "m1", "t": 1791600009.0, "x": 0.0, "y": 0.0, "temp_c": 24.1, "pressure_hpa": 1013.4, "soil_moisture": 343, "light": 335, "sound": 44, "uv": 0.16}
+{"mission_id": "m1", "t": 1791600015.0, "x": 0.0, "y": 0.0, "temp_c": 23.9, "pressure_hpa": 1013.2, "soil_moisture": 347, "light": 341, "sound": 46, "uv": 0.15, "air_quality": 106}
+{"mission_id": "m1", "t": 1791600021.0, "x": 0.0, "y": 0.0, "temp_c": 23.9, "pressure_hpa": 1013.0, "soil_moisture": 358, "light": 338, "sound": 45, "uv": 0.1}
+{"mission_id": "m1", "t": 1791600026.0, "x": 0.19, "y": -0.09, "temp_c": 24.0, "pressure_hpa": 1013.2, "soil_moisture": 339, "light": 345, "sound": 47, "uv": 0.2}
+{"mission_id": "m1", "t": 1791600027.0, "x": 0.37, "y": -0.17, "temp_c": 24.0, "pressure_hpa": 1013.1, "soil_moisture": 353, "light": 336, "sound": 43, "uv": 0.23, "air_quality": 108}
+{"mission_id": "m1", "t": 1791600028.0, "x": 0.56, "y": -0.26, "temp_c": 24.1, "pressure_hpa": 1012.8, "soil_moisture": 346, "light": 340, "sound": 51, "uv": 0.1}
+{"mission_id": "m1", "t": 1791600029.0, "x": 0.74, "y": -0.34, "temp_c": 24.2, "pressure_hpa": 1013.1, "soil_moisture": 352, "light": 335, "sound": 53, "uv": 0.2}
+{"mission_id": "m1", "t": 1791600030.0, "x": 0.93, "y": -0.43, "temp_c": 24.1, "pressure_hpa": 1013.5, "soil_moisture": 367, "light": 349, "sound": 48, "air_quality": 114}
+{"mission_id": "m1", "t": 1791600031.0, "x": 1.11, "y": -0.51, "temp_c": 24.3, "pressure_hpa": 1013.0, "soil_moisture": 353, "light": 358, "sound": 48, "uv": 0.19}
+{"mission_id": "m1", "t": 1791600032.0, "x": 1.3, "y": -0.6, "temp_c": 24.0, "pressure_hpa": 1013.0, "soil_moisture": 356, "light": 337, "sound": 47, "uv": 0.25}
+{"mission_id": "m1", "t": 1791600033.0, "x": 1.49, "y": -0.69, "temp_c": 24.8, "pressure_hpa": 1012.7, "soil_moisture": 344, "light": 357, "sound": 48, "uv": 0.24, "air_quality": 108}
+{"mission_id": "m1", "t": 1791600034.0, "x": 1.67, "y": -0.77, "temp_c": 24.4, "pressure_hpa": 1013.5, "soil_moisture": 333, "light": 348, "sound": 50, "uv": 0.18}
+{"mission_id": "m1", "t": 1791600035.0, "x": 1.86, "y": -0.86, "temp_c": 24.3, "pressure_hpa": 1012.9, "soil_moisture": 316, "light": 373, "sound": 50, "uv": 0.26}
+{"mission_id": "m1", "t": 1791600036.0, "x": 2.04, "y": -0.94, "temp_c": 24.4, "pressure_hpa": 1013.0, "soil_moisture": 344, "light": 367, "sound": 50, "air_quality": 115}
+{"mission_id": "m1", "t": 1791600037.0, "x": 2.23, "y": -1.03, "temp_c": 24.7, "pressure_hpa": 1013.3, "soil_moisture": 357, "light": 360, "sound": 48}
+{"mission_id": "m1", "t": 1791600038.0, "x": 2.41, "y": -1.11, "temp_c": 24.9, "pressure_hpa": 1013.4, "soil_moisture": 379, "light": 364, "sound": 46, "uv": 0.18}
+{"mission_id": "m1", "t": 1791600039.0, "x": 2.6, "y": -1.2, "temp_c": 24.7, "pressure_hpa": 1013.4, "soil_moisture": 381, "light": 374, "sound": 51, "uv": 0.2, "air_quality": 114}
+{"mission_id": "m1", "t": 1791600041.0, "x": 2.6, "y": -1.2, "temp_c": 24.8, "pressure_hpa": 1013.1, "soil_moisture": 373, "light": 366, "sound": 46}
+{"mission_id": "m1", "t": 1791600047.0, "x": 2.6, "y": -1.2, "temp_c": 25.0, "pressure_hpa": 1013.1, "soil_moisture": 374, "light": 371, "sound": 51, "uv": 0.21}
+{"mission_id": "m1", "t": 1791600053.0, "x": 2.6, "y": -1.2, "temp_c": 25.0, "pressure_hpa": 1012.8, "soil_moisture": 366, "light": 371, "sound": 50, "uv": 0.27, "air_quality": 112}
+{"mission_id": "m1", "t": 1791600059.0, "x": 2.6, "y": -1.2, "temp_c": 24.6, "pressure_hpa": 1013.3, "soil_moisture": 385, "light": 379, "sound": 47, "uv": 0.23}
+{"mission_id": "m1", "t": 1791600064.0, "x": 2.75, "y": -1.05, "temp_c": 24.5, "pressure_hpa": 1013.3, "soil_moisture": 398, "light": 359, "sound": 48}
+{"mission_id": "m1", "t": 1791600065.0, "x": 2.9, "y": -0.9, "temp_c": 24.8, "pressure_hpa": 1013.4, "soil_moisture": 396, "light": 339, "sound": 41, "uv": 0.24, "air_quality": 117}
+{"mission_id": "m1", "t": 1791600066.0, "x": 3.05, "y": -0.75, "temp_c": 24.9, "pressure_hpa": 1013.2, "soil_moisture": 431, "light": 356, "sound": 49, "uv": 0.28}
+{"mission_id": "m1", "t": 1791600067.0, "x": 3.2, "y": -0.6, "temp_c": 24.7, "pressure_hpa": 1012.8, "soil_moisture": 445, "light": 353, "sound": 46, "uv": 0.27}
+{"mission_id": "m1", "t": 1791600068.0, "x": 3.35, "y": -0.45, "temp_c": 24.8, "pressure_hpa": 1013.2, "soil_moisture": 450, "light": 355, "sound": 52, "uv": 0.24, "air_quality": 96}
+{"mission_id": "m1", "t": 1791600069.0, "x": 3.5, "y": -0.3, "temp_c": 24.9, "pressure_hpa": 1013.4, "soil_moisture": 496, "light": 341, "sound": 48}
+{"mission_id": "m1", "t": 1791600070.0, "x": 3.65, "y": -0.15, "temp_c": 25.2, "pressure_hpa": 1013.6, "soil_moisture": 489, "light": 352, "sound": 52, "uv": 0.17}
+{"mission_id": "m1", "t": 1791600071.0, "x": 3.8, "y": 0.0, "temp_c": 25.0, "pressure_hpa": 1013.0, "soil_moisture": 512, "light": 361, "sound": 48, "uv": 0.09, "air_quality": 109}
+{"mission_id": "m1", "t": 1791600072.0, "x": 3.95, "y": 0.15, "temp_c": 24.8, "pressure_hpa": 1013.4, "soil_moisture": 503, "light": 332, "sound": 47, "uv": 0.24}
+{"mission_id": "m1", "t": 1791600073.0, "x": 4.1, "y": 0.3, "temp_c": 25.1, "pressure_hpa": 1013.1, "soil_moisture": 476, "light": 336, "sound": 50, "uv": 0.17}
+{"mission_id": "m1", "t": 1791600074.0, "x": 4.25, "y": 0.45, "temp_c": 24.9, "pressure_hpa": 1012.9, "soil_moisture": 442, "light": 339, "sound": 44, "uv": 0.2, "air_quality": 118}
+{"mission_id": "m1", "t": 1791600075.0, "x": 4.4, "y": 0.6, "temp_c": 25.3, "pressure_hpa": 1013.2, "soil_moisture": 444, "light": 329, "sound": 46, "uv": 0.19}
+{"mission_id": "m1", "t": 1791600076.0, "x": 4.55, "y": 0.75, "temp_c": 25.1, "pressure_hpa": 1013.0, "soil_moisture": 435, "light": 311, "sound": 46}
+{"mission_id": "m1", "t": 1791600077.0, "x": 4.7, "y": 0.9, "temp_c": 25.3, "pressure_hpa": 1013.1, "soil_moisture": 402, "light": 335, "sound": 44, "uv": 0.2, "air_quality": 117}
+{"mission_id": "m1", "t": 1791600078.0, "x": 4.85, "y": 1.05, "temp_c": 25.3, "pressure_hpa": 1012.9, "soil_moisture": 378, "light": 306, "sound": 47, "uv": 0.14}
+{"mission_id": "m1", "t": 1791600079.0, "x": 5.0, "y": 1.2, "temp_c": 25.5, "pressure_hpa": 1013.6, "soil_moisture": 361, "light": 329, "sound": 42, "uv": 0.09}
+{"mission_id": "m1", "t": 1791600081.0, "x": 5.0, "y": 1.2, "temp_c": 25.3, "pressure_hpa": 1013.3, "soil_moisture": 362, "light": 322, "sound": 50, "air_quality": 112}
+{"mission_id": "m1", "t": 1791600087.0, "x": 5.0, "y": 1.2, "temp_c": 25.6, "pressure_hpa": 1012.9, "soil_moisture": 351, "light": 319, "sound": 46, "uv": 0.19}
+{"mission_id": "m1", "t": 1791600093.0, "x": 5.0, "y": 1.2, "temp_c": 25.4, "pressure_hpa": 1013.8, "soil_moisture": 349, "light": 319, "sound": 55, "uv": 0.05}
+{"mission_id": "m1", "t": 1791600099.0, "x": 5.0, "y": 1.2, "temp_c": 25.5, "pressure_hpa": 1013.3, "soil_moisture": 361, "light": 307, "sound": 49, "uv": 0.21, "air_quality": 116}
+{"mission_id": "m1", "t": 1791600104.0, "x": 4.81, "y": 1.26, "temp_c": 25.4, "pressure_hpa": 1013.1, "soil_moisture": 363, "light": 311, "sound": 50, "uv": 0.21}
+{"mission_id": "m1", "t": 1791600105.0, "x": 4.62, "y": 1.32, "temp_c": 25.3, "pressure_hpa": 1013.2, "soil_moisture": 397, "light": 312, "sound": 49, "uv": 0.2}
+{"mission_id": "m1", "t": 1791600106.0, "x": 4.42, "y": 1.38, "temp_c": 25.7, "pressure_hpa": 1013.3, "soil_moisture": 390, "light": 316, "sound": 42, "uv": 0.25, "air_quality": 111}
+{"mission_id": "m1", "t": 1791600107.0, "x": 4.23, "y": 1.45, "temp_c": 25.4, "pressure_hpa": 1013.5, "soil_moisture": 394, "light": 310, "sound": 46}
+{"mission_id": "m1", "t": 1791600108.0, "x": 4.04, "y": 1.51, "temp_c": 25.1, "pressure_hpa": 1012.9, "soil_moisture": 429, "light": 318, "sound": 44}
+{"mission_id": "m1", "t": 1791600109.0, "x": 3.85, "y": 1.57, "temp_c": 24.9, "pressure_hpa": 1013.3, "soil_moisture": 409, "light": 314, "sound": 45, "uv": 0.09, "air_quality": 107}
+{"mission_id": "m1", "t": 1791600110.0, "x": 3.65, "y": 1.63, "temp_c": 25.1, "pressure_hpa": 1013.4, "soil_moisture": 407, "light": 306, "sound": 49}
+{"mission_id": "m1", "t": 1791600111.0, "x": 3.46, "y": 1.69, "temp_c": 25.1, "pressure_hpa": 1013.3, "soil_moisture": 421, "light": 301, "sound": 52, "uv": 0.17}
+{"mission_id": "m1", "t": 1791600112.0, "x": 3.27, "y": 1.75, "temp_c": 25.0, "pressure_hpa": 1013.2, "soil_moisture": 410, "light": 304, "sound": 48, "uv": 0.17, "air_quality": 110}
+{"mission_id": "m1", "t": 1791600113.0, "x": 3.08, "y": 1.82, "temp_c": 24.5, "pressure_hpa": 1013.3, "soil_moisture": 416, "light": 312, "sound": 44, "uv": 0.22}
+{"mission_id": "m1", "t": 1791600114.0, "x": 2.88, "y": 1.88, "temp_c": 24.7, "pressure_hpa": 1013.4, "soil_moisture": 381, "light": 281, "sound": 44, "uv": 0.28}
+{"mission_id": "m1", "t": 1791600115.0, "x": 2.69, "y": 1.94, "temp_c": 24.7, "pressure_hpa": 1013.0, "soil_moisture": 396, "light": 303, "sound": 48, "uv": 0.21, "air_quality": 111}
+{"mission_id": "m1", "t": 1791600116.0, "x": 2.5, "y": 2.0, "temp_c": 24.9, "pressure_hpa": 1013.7, "soil_moisture": 419, "light": 308, "sound": 44, "uv": 0.2}
+{"mission_id": "m1", "t": 1791600118.0, "x": 2.5, "y": 2.0, "temp_c": 24.9, "pressure_hpa": 1013.0, "soil_moisture": 411, "light": 294, "sound": 48, "uv": 0.26}
+{"mission_id": "m1", "t": 1791600124.0, "x": 2.5, "y": 2.0, "temp_c": 24.7, "pressure_hpa": 1013.2, "soil_moisture": 436, "light": 297, "sound": 50, "air_quality": 106}
+{"mission_id": "m1", "t": 1791600130.0, "x": 2.5, "y": 2.0, "temp_c": 24.9, "pressure_hpa": 1013.0, "soil_moisture": 410, "light": 299, "sound": 47, "uv": 0.24}
+{"mission_id": "m1", "t": 1791600136.0, "x": 2.5, "y": 2.0, "temp_c": 24.9, "pressure_hpa": 1013.3, "soil_moisture": 410, "light": 298, "sound": 50, "uv": 0.12}
+{"mission_id": "m1", "t": 1791600141.0, "x": 2.31, "y": 2.08, "temp_c": 24.6, "pressure_hpa": 1012.9, "soil_moisture": 405, "light": 304, "sound": 45, "uv": 0.23, "air_quality": 111}
+{"mission_id": "m1", "t": 1791600142.0, "x": 2.12, "y": 2.15, "temp_c": 24.6, "pressure_hpa": 1012.8, "soil_moisture": 443, "light": 301, "sound": 51, "uv": 0.16}
+{"mission_id": "m1", "t": 1791600143.0, "x": 1.92, "y": 2.23, "temp_c": 24.6, "pressure_hpa": 1013.0, "soil_moisture": 416, "light": 293, "sound": 50, "uv": 0.12}
+{"mission_id": "m1", "t": 1791600144.0, "x": 1.73, "y": 2.31, "temp_c": 24.2, "pressure_hpa": 1012.9, "soil_moisture": 420, "light": 282, "sound": 48, "air_quality": 113}
+{"mission_id": "m1", "t": 1791600145.0, "x": 1.54, "y": 2.38, "temp_c": 24.4, "pressure_hpa": 1013.3, "soil_moisture": 428, "light": 283, "sound": 45, "uv": 0.15}
+{"mission_id": "m1", "t": 1791600146.0, "x": 1.35, "y": 2.46, "temp_c": 24.4, "pressure_hpa": 1013.2, "soil_moisture": 419, "light": 278, "sound": 44, "uv": 0.2}
+{"mission_id": "m1", "t": 1791600147.0, "x": 1.15, "y": 2.54, "temp_c": 24.6, "pressure_hpa": 1013.4, "soil_moisture": 404, "light": 292, "sound": 47, "uv": 0.28, "air_quality": 110}
+{"mission_id": "m1", "t": 1791600148.0, "x": 0.96, "y": 2.62, "temp_c": 23.7, "pressure_hpa": 1012.9, "soil_moisture": 392, "light": 275, "sound": 48, "uv": 0.15}
+{"mission_id": "m1", "t": 1791600149.0, "x": 0.77, "y": 2.69, "temp_c": 24.0, "pressure_hpa": 1013.3, "soil_moisture": 381, "light": 285, "sound": 52, "uv": 0.19}
+{"mission_id": "m1", "t": 1791600150.0, "x": 0.58, "y": 2.77, "temp_c": 24.2, "pressure_hpa": 1013.4, "soil_moisture": 366, "light": 278, "sound": 43, "uv": 0.18, "air_quality": 118}
+{"mission_id": "m1", "t": 1791600151.0, "x": 0.38, "y": 2.85, "temp_c": 23.9, "pressure_hpa": 1013.3, "soil_moisture": 363, "light": 294, "sound": 50, "uv": 0.33}
+{"mission_id": "m1", "t": 1791600152.0, "x": 0.19, "y": 2.92, "temp_c": 24.3, "pressure_hpa": 1013.2, "soil_moisture": 343, "light": 262, "sound": 45, "uv": 0.21}
+{"mission_id": "m1", "t": 1791600153.0, "x": 0.0, "y": 3.0, "temp_c": 24.1, "pressure_hpa": 1013.1, "soil_moisture": 311, "light": 277, "sound": 40, "air_quality": 109}
+{"mission_id": "m1", "t": 1791600155.0, "x": 0.0, "y": 3.0, "temp_c": 24.1, "pressure_hpa": 1012.9, "soil_moisture": 327, "light": 271, "sound": 48, "uv": 0.31}
+{"mission_id": "m1", "t": 1791600161.0, "x": 0.0, "y": 3.0, "temp_c": 24.0, "pressure_hpa": 1013.2, "soil_moisture": 305, "light": 280, "sound": 47, "uv": 0.23}
+{"mission_id": "m1", "t": 1791600167.0, "x": 0.0, "y": 3.0, "temp_c": 23.8, "pressure_hpa": 1013.7, "soil_moisture": 332, "light": 280, "sound": 48, "uv": 0.18, "air_quality": 109}
+{"mission_id": "m1", "t": 1791600173.0, "x": 0.0, "y": 3.0, "temp_c": 23.6, "pressure_hpa": 1013.1, "soil_moisture": 325, "light": 257, "sound": 54, "uv": 0.17}

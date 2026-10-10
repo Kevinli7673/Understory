@@ -12,6 +12,13 @@ Architecture line: **live on the edge (Jetson), deep in the cloud (AMD).**
 
 Honest framing: an indoor mecanum robot on the venue floor stands in for the field. Don't oversell in docs or Devpost copy.
 
+## Current status
+
+_Updated Sat Oct 10, ~4 AM._
+
+- **Kevin (Quest app):** Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207 + OpenXR, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub` (the one set of handlers ROS subscribers will also call). Next: ROS subscribers/publishers, tabletop map twin, bubble ring builder.
+- **Open:** panorama image yaw convention isn't in the contracts yet; fakes use center = yaw 0, left edge = +π (see `fake_data/README.md`). Perception to confirm.
+
 ## Hackathon rules that affect code
 
 - Code freeze Sun 11 AM; submit by 9:30 AM. Favor working, demoable code over clean abstractions.
