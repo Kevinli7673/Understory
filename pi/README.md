@@ -119,7 +119,7 @@ This fallback has not been tested with two machines.
 
 ## Known gaps
 
-- No GPU container for the Jetson yet, so the AI runs on the CPU everywhere. `nanoowl_trt` is still a stub.
+- The Jetson has a GPU image (`pi/jetson/Dockerfile.gpu`) and a TensorRT detector (`nanoowl_trt`, see HANDOFF.md session 9). The Pi runs the AI on the CPU.
 - The Whisper node (`/voice/audio` -> `/voice/text`, started by `scout_ai_up.sh`) has only been tested with synthetic speech.
 - No ESP32 bridge: nothing drives the motors and nothing publishes the real `/sensors`.
 - The `/species` JSON is not in `AGENTS.md` yet (shape in `HANDOFF.md`, section 5).

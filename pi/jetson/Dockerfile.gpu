@@ -14,3 +14,7 @@ RUN echo 'numpy<2' > /tmp/constraints.txt \
       --index-url https://download.pytorch.org/whl/cu132 torch torchvision \
  && pip3 install --no-cache-dir --break-system-packages --default-timeout=180 --retries 15 -c /tmp/constraints.txt \
       transformers open_clip_torch
+# TensorRT for the nanoowl_trt detector backend (SBSA aarch64 wheels, same CUDA 13 libraries as torch),
+# and onnx + onnxscript for exporting the OWL-ViT image encoder (pi/scripts/build_owl_engine.py).
+RUN pip3 install --no-cache-dir --break-system-packages --default-timeout=180 --retries 15 -c /tmp/constraints.txt \
+      tensorrt-cu13 onnx onnxscript

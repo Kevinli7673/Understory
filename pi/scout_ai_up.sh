@@ -13,7 +13,8 @@
 #   AI_IMAGE=scout-ros-ai        Docker image. Default is the CPU build (pi/docker/Dockerfile.ai).
 #   AI_RUNTIME=nvidia            Docker runtime, for a CUDA image on the Jetson. Default: none.
 #   AI_THREADS=2                 CPU threads PyTorch may use. Keeps cores free for mapping and Nav2.
-#   DETECTOR_BACKEND=owlvit_torch | dummy        SPECIES_BACKEND=bioclip | dummy
+#   DETECTOR_BACKEND=owlvit_torch | nanoowl_trt | dummy        SPECIES_BACKEND=bioclip | dummy
+#                                nanoowl_trt: Jetson GPU only, after pi/scripts/build_owl_engine.py has built its engine
 #   DETECTOR_THRESHOLD=0.05      lower finds more plants and more junk
 #   WHISPER_MODEL=openai/whisper-base.en   or openai/whisper-small.en (slower, more accurate), or none to skip it
 #   WHISPER_DEVICE=cpu           cpu keeps Whisper off the GPU. Each GPU process loads about 1 GB of CUDA libraries,

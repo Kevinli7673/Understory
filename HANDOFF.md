@@ -30,7 +30,7 @@ follow the rules in section 12.
 | Robot driving | **Not possible yet** | no ESP32 bridge in the repo, nothing consumes `/cmd_vel` |
 | `/sensors` from the ESP32 | **Does not exist** | `fake_sensors.py` stands in |
 | Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. **No human voice and no Quest clip tried yet** |
-| NanoOWL / TensorRT | Stub | speed upgrade only |
+| NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
 | Logger, dashboard, Neon sync | Not in the repo | other owners |
 
 The short version: **the full perception chain now runs on the Pi alone, slowly.** A plant photo held
@@ -94,7 +94,7 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 | File | What it is |
 | --- | --- |
 | `detector_node.py` | camera -> `/detections`. Parameters: `backend`, `prompts`, `score_threshold` |
-| `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (stub) |
+| `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (real, Jetson only: TensorRT engine from `pi/scripts/build_owl_engine.py`) |
 | `species_node.py` | `/detections` + camera -> `/species`. Parameters: `backend`, `min_confidence` (0.5), `max_boxes` (3) |
 | `species_backends.py` | `dummy`, `bioclip` |
 | `species_labels.py` | **The species list. Edit this to match the habitat.** Also the "not a plant" list |
@@ -380,7 +380,7 @@ Things to tell Kevin:
 7. **Saturday night:** one full recorded mission as the fallback `AGENTS.md` asks for.
 8. **Voice with a real person.** The Whisper node exists (section 5a) but has only heard a
    synthetic voice. Hold X on the Quest, say each command, and read `~/fetch_ws/logs/whisper.log`.
-9. **NanoOWL + TensorRT**, and a PyTorch-versus-TensorRT speed number for the pitch.
+9. ~~NanoOWL + TensorRT, and a PyTorch-versus-TensorRT speed number for the pitch.~~ Done Sat 5 PM (section 11, session 9).
 
 Waiting on teammates:
 - **Hardware (Teammate 4):** ESP32 serial bridge (`/cmd_vel` in as plain `Twist`, `/sensors` JSON
@@ -555,7 +555,45 @@ installed on it."*
   `map -> base_link` ok, 2.7 GB available (no Firefox open), 10 W, over-current counter 0 since boot.
   The script's own "/detections" check failed twice and passed on the third try, as before. The script
   used to hold the terminal after finishing (its two background helpers kept the output open); fixed.
-- Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
+
+**Session 9, Sat 4:40 to 5:20 PM, TensorRT detector on the Jetson.** *"Go ahead with NanoOWL + TensorRT."*
+- **What it is.** `nanoowl_trt` runs OWL-ViT the way NanoOWL does: the image side (vision transformer, box
+  head, class head) is one TensorRT engine, and the prompts are encoded once with PyTorch at startup, so
+  they can change without a rebuild. It is written against TensorRT directly in `backends.py`; the
+  `nanoowl` package itself is not installed (it needs `torch2trt` and was written for older TensorRT).
+- **Image.** `Dockerfile.gpu` now adds `tensorrt-cu13` 11.4, `onnx` and `onnxscript`. The image was rebuilt
+  and `scout-ai` recreated from it. TensorRT 11 has no half-precision switch; the precision comes from
+  the ONNX file, so the export is done in half precision.
+- **Engine.** `docker exec scout-ai bash -c 'source /fetch_ws/install/setup.bash && python3
+  /fetch_ws/src/Understory/pi/scripts/build_owl_engine.py'` with the AI nodes stopped. 103 s, 189 MB, at
+  `~/fetch_ws/models/owlvit-base-patch32.engine` (not in the repo: an engine only runs on the kind of GPU
+  that built it). Lowest available memory during the build: about 0.8 GB.
+- **Speed** (`pi/scripts/detector_bench.py`, 100 frames of 640x480, live AI stopped, mapping and Nav2 running):
+
+  | | PyTorch, half precision | TensorRT |
+  | --- | --- | --- |
+  | Model alone | 61.8 ms (16.2 per second) | 19.0 ms (52.7 per second) |
+  | Whole frame (resize + model + box filtering) | 78.1 ms (12.8 per second) | 40.3 ms (24.8 per second) |
+  | Live `/detections`, 15 Hz camera | 9.8 Hz | 15.3 Hz (every frame) |
+
+- **The resize to 768x768 now runs on the GPU in both backends** (6 ms instead of 26 ms). Before that
+  change the PyTorch whole frame was 103.5 ms. The resized image differs slightly from the CPU one
+  and some scores moved (one box on the cogongrass photo went from 0.21 to 0.40); the self-test result
+  did not change.
+- **Same answers.** Boxes on the five test photos match PyTorch's to a few pixels and about 0.02 in
+  score. `ai_selftest.sh` with `AI_ONE_PROCESS=1`: PASS 5 of 5 with both backends, same five pins, same
+  confidences.
+- **A bug found and fixed on the way:** with the resize on PyTorch's default CUDA stream and the engine on
+  its own, every frame got the boxes of the frame before it. All GPU steps now run on one stream;
+  200 alternating plant and grey frames gave 0 wrong answers.
+- **Default.** `jetson_up.sh` picks `nanoowl_trt` when the engine file exists and the image is
+  `scout-ros-ai-gpu`. `DETECTOR_BACKEND=owlvit_torch` goes back to PyTorch. The Pi is unchanged.
+- **Over-current counter went from 0 to 14** between 5:06 and 5:08 PM, all during the benchmark and
+  self-test runs (board at 13 to 15 W). None since; the live stack sits at about 10.5 W with 2.4 GB available.
+- `~/start_understory.sh` now returns when it is done (checked on this restart).
+- Left running at 5:17 PM. Jetson: mapping, Nav2, mission, panorama, `ai_node` (TensorRT detector),
+  localizer. Pi: sensors, endpoint, Foxglove, Whisper. `/scan` 10.0 Hz, camera 15.2 Hz, `/mission/state` `IDLE`.
+- Not tested: a real plant in front of the live camera with the new backend.
 
 ## 12. Rules for anyone (or any agent) continuing
 
@@ -592,6 +630,7 @@ date                          # check after every reboot
 SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 NO_AI=1 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 AI_IMAGE=<cuda image> AI_RUNTIME=nvidia ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+DETECTOR_BACKEND=owlvit_torch ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh   # PyTorch detector instead of TensorRT
 tegrastats
 
 # ---- inside the scout container ----

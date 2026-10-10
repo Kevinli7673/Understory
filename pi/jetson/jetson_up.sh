@@ -9,7 +9,9 @@
 #   SCOUT_PEER=172.20.10.10 .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
 #   NO_AI=1 .../jetson_up.sh                        # mapping + mission only, no plant AI
 #   The plant AI uses the image scout-ros-ai-gpu when it exists (build: pi/jetson/Dockerfile.gpu, HANDOFF.md),
-#   with AI_ONE_PROCESS=1 and WHISPER_MODEL=none. Set AI_IMAGE / AI_RUNTIME / AI_ONE_PROCESS= / WHISPER_MODEL to override.
+#   with AI_ONE_PROCESS=1 and WHISPER_MODEL=none, and the TensorRT detector (DETECTOR_BACKEND=nanoowl_trt) when
+#   ~/fetch_ws/models/owlvit-base-patch32.engine exists. Set AI_IMAGE / AI_RUNTIME / AI_ONE_PROCESS= / WHISPER_MODEL /
+#   DETECTOR_BACKEND to override.
 
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
@@ -94,6 +96,11 @@ if [ -z "$NO_AI" ]; then
     export AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=${AI_RUNTIME:-nvidia}
   fi
   export AI_ONE_PROCESS=${AI_ONE_PROCESS-1} WHISPER_MODEL=${WHISPER_MODEL:-none}
+  # the TensorRT detector once its engine has been built (pi/scripts/build_owl_engine.py);
+  # DETECTOR_BACKEND=owlvit_torch goes back to plain PyTorch
+  if [ -z "$DETECTOR_BACKEND" ] && [ "$AI_IMAGE" = scout-ros-ai-gpu ] && [ -f "$HOME/fetch_ws/models/owlvit-base-patch32.engine" ]; then
+    export DETECTOR_BACKEND=nanoowl_trt
+  fi
   "$(dirname "$(readlink -f "$0")")/../scout_ai_up.sh"
 fi
 echo "Done. Stop with: docker exec scout pkill -INT -f 'ros2 launch'; $(dirname "$(readlink -f "$0")")/../scout_ai_up.sh --stop"
