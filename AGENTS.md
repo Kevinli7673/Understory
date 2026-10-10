@@ -24,7 +24,7 @@ _Updated Sat Oct 10, ~6:30 AM._
   - **Compile check without focusing Unity:** `bash tools/check_unity_scripts.sh` (Unity's Roslyn against the project's DLLs).
   - **Logic unit tests:** `bash tools/test_unity_logic.sh` (contracts, map loading, before/after rule, RosCoords).
   - **ROS wire-format test:** `bash tools/test_ros_compat.sh` round-trips messages between the mock (Python) and the app's real ROS-TCP-Connector message classes (run on Unity's .NET, no editor).
-  - **Jetson IP on the headset:** `echo <ip> > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`, restart the app. Table status line shows `LIVE <ip>` / `FAKE · connecting <ip>`.
+  - **Jetson IP on the headset:** in VR: panel **Robot address** → keypad → Connect (saved, reconnects immediately). Or: `echo <ip> > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`, restart the app. Table status line shows `LIVE <ip>` / `FAKE · connecting <ip>`.
 - **Open (Kevin → Alvaro), proposed:** `/voice/audio` = `std_msgs/UInt8MultiArray` whose `data` is a complete **WAV file, 16 kHz mono 16-bit** (Quest `PushToTalk`: hold X, release to send). Whisper node: `wave`/`soundfile` reads it directly → publish the text on `/voice/text`. `tools/quest_mock_endpoint.py` saves received clips to `%TEMP%/understory_voice_last.wav` for testing.
 - **Open (Kevin → Alvaro):** `panorama_node` sends *either* the pano *or* the frames. cv2 stitcher output has no known start yaw (and is cropped / may not span 360°), so the Quest can't place pins on it. Proposal: **always publish the frames (`<bubble_id>/<index>`); pano is an optional extra.** The Quest app now shows the frame ring by default and uses the pano only when no frames arrive.
 

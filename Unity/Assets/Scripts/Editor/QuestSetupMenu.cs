@@ -88,6 +88,7 @@ namespace Understory.EditorTools
                 if (hub.GetComponent<PushToTalk>() == null) Undo.AddComponent<PushToTalk>(hub.gameObject);
                 if (hub.GetComponent<SplatView>() == null) Undo.AddComponent<SplatView>(hub.gameObject);
                 if (hub.GetComponent<ControlsHint>() == null) Undo.AddComponent<ControlsHint>(hub.gameObject);
+                if (hub.GetComponent<IpKeypad>() == null) Undo.AddComponent<IpKeypad>(hub.gameObject);
             }
             else Debug.LogWarning("[QuestSetup] No SurveyHub in the scene; ROS components not added.");
 

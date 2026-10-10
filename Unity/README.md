@@ -57,7 +57,7 @@ Panel buttons (right of the table): Start survey, Capture here, Resume, Manual, 
   before/after rule, RosCoords; real source files on Unity's .NET).
 - **ROS wire format:** `bash tools/test_ros_compat.sh` round-trips messages between the mock and the real
   ROS-TCP-Connector message classes (Unity's .NET, no editor).
-- **Jetson / mock IP on the headset:**
+- **Jetson / mock IP on the headset:** in VR, panel **Robot address** → keypad → Connect (saved + reconnects). Or
   `echo 192.168.x.y > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`,
   then restart the app. The table's status line shows `LIVE <ip>` or `FAKE · connecting <ip>`.
 

@@ -122,6 +122,25 @@ namespace Understory
             hub.HandleRobotPose((float)p.x, (float)p.y, yaw);
         }
 
+        /// <summary>
+        /// Switch the endpoint at runtime (in-VR keypad): saves ros_ip.txt so it sticks across restarts and
+        /// reconnects now. Subscriptions/publishers re-register automatically on the new connection.
+        /// </summary>
+        public bool SetAddress(string ip)
+        {
+            if (!IPAddress.TryParse(ip, out _)) return false;
+            try { File.WriteAllText(Path.Combine(Application.persistentDataPath, IpFileName), ip); }
+            catch (Exception e) { Debug.LogWarning($"[RosSource] Couldn't save {IpFileName}: {e.Message}"); }
+            Ip = ip;
+            if (ros != null)
+            {
+                ros.Disconnect();
+                ros.Connect(ip, port);
+            }
+            Debug.Log($"[RosSource] endpoint -> {ip}:{port}");
+            return true;
+        }
+
         /// <summary>First real message: stop the fake replay and wipe its data, once.</summary>
         void GoLive()
         {

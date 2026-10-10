@@ -34,11 +34,13 @@ namespace Understory
 
         TextMesh text;
         bool lastXr;
+        IpKeypad keypad;
 
         void Start()
         {
             if (table == null) table = FindAnyObjectByType<TabletopMap>();
             if (table == null) { enabled = false; return; }
+            keypad = FindAnyObjectByType<IpKeypad>();
             table.LayoutChanged += Place;
         }
 
@@ -59,6 +61,8 @@ namespace Understory
                 Place();
             }
             if (text == null) return;
+            // The robot-address keypad opens in the same spot.
+            text.gameObject.SetActive(keypad == null || !keypad.IsOpen);
             bool xr = XRSettings.isDeviceActive;
             if (xr != lastXr) { text.text = xr ? Quest : Desktop; lastXr = xr; }
         }

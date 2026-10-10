@@ -12,6 +12,7 @@ namespace Understory
         [SerializeField] TabletopMap table;
         [SerializeField] MissionPanel panel;
         [SerializeField] BubbleNavigator navigator;
+        [SerializeField] IpKeypad keypad;
         [Tooltip("URP/Unlit material for the ray. Auto-assigned when the component is added.")]
         [SerializeField] Material material;
         [SerializeField] OVRInput.Controller controller = OVRInput.Controller.RTouch;
@@ -27,6 +28,7 @@ namespace Understory
             if (table == null) table = FindAnyObjectByType<TabletopMap>();
             if (panel == null) panel = FindAnyObjectByType<MissionPanel>();
             if (navigator == null) navigator = FindAnyObjectByType<BubbleNavigator>();
+            if (keypad == null) keypad = FindAnyObjectByType<IpKeypad>();
             var rig = FindAnyObjectByType<OVRCameraRig>();
             if (rig != null) trackingSpace = rig.trackingSpace;
             if (material == null) material = WorldUI.FallbackUnlit();
@@ -67,7 +69,8 @@ namespace Understory
                 var ray = new Ray(origin, dir);
                 if (onTable)
                 {
-                    if (panel == null || !panel.TrySelect(ray)) table.TrySelect(ray); // buttons first, then capture spots
+                    // keypad, then panel buttons, then pins / capture spots
+                    if ((keypad == null || !keypad.TrySelect(ray)) && (panel == null || !panel.TrySelect(ray))) table.TrySelect(ray);
                 }
                 else navigator.TrySelect(ray); // bubble view: floor arrows to neighboring bubbles
             }
