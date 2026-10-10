@@ -23,6 +23,7 @@ namespace Understory
         [SerializeField] float radius = 3f;
         [Tooltip("Switch to each new bubble as it arrives (live mode).")]
         [SerializeField] bool autoShowLatest = true;
+        bool following = true; // live mode; Show(id) turns it off, FollowLatest() turns it back on
         [Tooltip("Show the stitched pano even when frames exist. Off by default: frames carry exact yaws, " +
                  "while stitcher output has no known start heading, so pins can't be placed on it reliably.")]
         [SerializeField] bool preferPano;
@@ -56,6 +57,7 @@ namespace Understory
         void Start()
         {
             if (hub == null) hub = SurveyHub.Instance;
+            following = autoShowLatest;
             if (follow == null && Camera.main != null) follow = Camera.main.transform;
             if (panelMaterial == null)
             {
@@ -101,7 +103,24 @@ namespace Understory
 
         // ---- public API (controllers / map twin call these) ----
 
+        /// <summary>Show a specific bubble and stay on it: new bubbles arriving don't take over.</summary>
         public void Show(string bubbleId)
+        {
+            following = false;
+            Display(bubbleId);
+        }
+
+        /// <summary>Live mode: show the newest bubble and switch to each new one as it arrives.</summary>
+        public void FollowLatest()
+        {
+            following = true;
+            Bubble latest = null;
+            foreach (var b in hub.Bubbles.Values)
+                if (latest == null || b.T > latest.T) latest = b;
+            if (latest != null) Display(latest.BubbleId);
+        }
+
+        void Display(string bubbleId)
         {
             CurrentBubbleId = bubbleId;
             Rebuild();
@@ -127,7 +146,7 @@ namespace Understory
 
         void OnBubble(Bubble b)
         {
-            if (autoShowLatest || CurrentBubbleId == null || b.BubbleId == CurrentBubbleId) Show(b.BubbleId);
+            if (following || CurrentBubbleId == null || b.BubbleId == CurrentBubbleId) Display(b.BubbleId);
         }
 
         void OnImage(string frameId, Texture2D tex)
