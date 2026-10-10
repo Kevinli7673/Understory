@@ -60,7 +60,7 @@ namespace Understory
         {
             float resolution = 0.05f, occThresh = 0.65f, freeThresh = 0.25f;
             float ox = 0f, oy = 0f;
-            bool negate = false;
+            bool negate = false, trinary = false;
             foreach (var raw in yaml.Split('\n'))
             {
                 int colon = raw.IndexOf(':');
@@ -72,6 +72,7 @@ namespace Understory
                     case "occupied_thresh": occThresh = ParseF(val); break;
                     case "free_thresh": freeThresh = ParseF(val); break;
                     case "negate": negate = val == "1" || val.ToLowerInvariant() == "true"; break;
+                    case "mode": trinary = val.Trim().ToLowerInvariant() == "trinary"; break;
                     case "origin":
                         var parts = val.Trim('[', ']').Split(',');
                         ox = ParseF(parts[0]);
@@ -92,7 +93,10 @@ namespace Understory
             for (int r = 0; r < h; r++)
             for (int c = 0; c < w; c++)
             {
-                float v = pgm[pos + r * w + c] / (float)maxVal;
+                byte px = pgm[pos + r * w + c];
+                // map_saver writes unknown as exactly 205 in trinary mode; by threshold alone it would read as free.
+                if (trinary && px == 205 && maxVal == 255) { cells[(h - 1 - r) * w + c] = -1; continue; }
+                float v = px / (float)maxVal;
                 float p = negate ? v : 1f - v; // probability occupied
                 sbyte cell = p > occThresh ? (sbyte)100 : p < freeThresh ? (sbyte)0 : (sbyte)-1;
                 cells[(h - 1 - r) * w + c] = cell; // PGM row 0 is the top (max y)

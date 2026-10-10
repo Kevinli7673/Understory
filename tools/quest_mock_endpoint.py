@@ -220,10 +220,15 @@ def load_map(folder):
     pos += 1
     w, h, maxval = int(tokens[1]), int(tokens[2]), int(tokens[3])
     occ, free = float(yaml.get('occupied_thresh', 0.65)), float(yaml.get('free_thresh', 0.25))
+    trinary = yaml.get('mode', 'trinary').strip().lower() == 'trinary'
     data = []
     for r in range(h - 1, -1, -1):
         for c in range(w):
-            p = 1.0 - raw[pos + r * w + c] / maxval
+            shade = raw[pos + r * w + c]
+            if trinary and shade == 205:  # map_saver's "unknown"
+                data.append(-1)
+                continue
+            p = 1.0 - shade / maxval
             data.append(100 if p > occ else 0 if p < free else -1)
     origin = [float(v) for v in yaml['origin'].strip('[]').split(',')]
     return {'resolution': float(yaml['resolution']), 'width': w, 'height': h, 'origin': origin, 'data': data}

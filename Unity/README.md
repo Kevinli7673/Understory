@@ -53,6 +53,8 @@ Panel buttons (right of the table): Start survey, Capture here, Resume, Manual, 
   ros_tcp_endpoint protocol, simulates the robot and prints what the app sends. Editor connects to
   127.0.0.1; on the Quest push the laptop IP (below).
 - **Compile check without focusing Unity:** `bash tools/check_unity_scripts.sh` (editor + Android passes).
+- **Logic unit tests:** `bash tools/test_unity_logic.sh` (JSON contracts on every fake mission line, map loading,
+  before/after rule, RosCoords; real source files on Unity's .NET).
 - **ROS wire format:** `bash tools/test_ros_compat.sh` round-trips messages between the mock and the real
   ROS-TCP-Connector message classes (Unity's .NET, no editor).
 - **Jetson / mock IP on the headset:**
