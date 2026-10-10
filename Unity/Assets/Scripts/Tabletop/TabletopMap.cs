@@ -77,6 +77,10 @@ namespace Understory
         readonly Dictionary<string, GameObject> pins = new Dictionary<string, GameObject>();
         readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         Vector2? robotPos;
+        Vector3 robotTargetPos;
+        Quaternion robotTargetRot = Quaternion.identity;
+        const float RobotSmoothing = 12f;      // higher = snappier
+        const float RobotSnapDistance = 0.1f;  // board meters: jump instead of gliding (~1 m in the room)
         float lastRealPose = -100f;
         float nextStatus;
         RosSurveySource rosSource;
@@ -136,6 +140,14 @@ namespace Understory
 
         void Update()
         {
+            if (robot != null && robot.activeSelf)
+            {
+                float k = 1f - Mathf.Exp(-RobotSmoothing * Time.deltaTime); // frame-rate independent ease
+                var t = robot.transform;
+                t.SetLocalPositionAndRotation(Vector3.Lerp(t.localPosition, robotTargetPos, k),
+                    Quaternion.Slerp(t.localRotation, robotTargetRot, k));
+            }
+
             // Link status / e-stop change without hub events, so refresh the status line twice a second.
             if (Time.unscaledTime >= nextStatus)
             {
@@ -216,11 +228,15 @@ namespace Understory
         /// <summary>Robot pose in the ROS map frame. Fed from readings for now; the ROS step feeds real TF.</summary>
         public void SetRobotPose(float x, float y, float yaw)
         {
+            bool first = !robot.activeSelf;
             robotPos = new Vector2(x, y);
             robotYaw = yaw;
             robot.SetActive(true);
-            robot.transform.localPosition = BoardPos(x, y);
-            robot.transform.localRotation = RosCoords.ToUnityRotation(yaw);
+            // Poses arrive at ~10 Hz; Update() glides the marker toward them so it doesn't stutter in VR.
+            robotTargetPos = BoardPos(x, y);
+            robotTargetRot = RosCoords.ToUnityRotation(yaw);
+            if (first || (robot.transform.localPosition - robotTargetPos).magnitude > RobotSnapDistance)
+                robot.transform.SetLocalPositionAndRotation(robotTargetPos, robotTargetRot); // first pose / relocalization
             AddTrailPoint(x, y);
         }
 
@@ -377,7 +393,11 @@ namespace Understory
 
             placed.RemoveAll(e => e.t == null);
             foreach (var (t, ros) in placed) t.localPosition = BoardPos(ros.x, ros.y);
-            if (robotPos.HasValue) robot.transform.localPosition = BoardPos(robotPos.Value.x, robotPos.Value.y);
+            if (robotPos.HasValue)
+            {
+                robotTargetPos = BoardPos(robotPos.Value.x, robotPos.Value.y);
+                robot.transform.localPosition = robotTargetPos;
+            }
             RedrawTrail();
 
             status.transform.localPosition = new Vector3(0f, 0.005f, -(spanX * scale / 2f + Margin + 0.01f));
