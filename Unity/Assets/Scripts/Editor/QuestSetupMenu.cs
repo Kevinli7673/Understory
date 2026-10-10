@@ -85,6 +85,7 @@ namespace Understory.EditorTools
                 if (hub.GetComponent<BubbleNavigator>() == null) Undo.AddComponent<BubbleNavigator>(hub.gameObject);
                 if (hub.GetComponent<TableGrab>() == null) Undo.AddComponent<TableGrab>(hub.gameObject);
                 if (hub.GetComponent<PinCard>() == null) Undo.AddComponent<PinCard>(hub.gameObject);
+                if (hub.GetComponent<PushToTalk>() == null) Undo.AddComponent<PushToTalk>(hub.gameObject);
             }
             else Debug.LogWarning("[QuestSetup] No SurveyHub in the scene; ROS components not added.");
 

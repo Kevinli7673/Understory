@@ -33,4 +33,10 @@ NEWTONSOFT=$(ls Library/PackageCache/com.unity.nuget.newtonsoft-json@*/Runtime/N
 } > "$RSP"
 
 "$E/NetCoreRuntime/dotnet.exe" "$E/DotNetSdkRoslyn/csc.dll" "@$RSP"
-echo "OK: Assets/Scripts compiles."
+echo "OK: editor configuration compiles."
+
+# Second pass as the Quest player build sees it: UNITY_ANDROID, no UNITY_EDITOR, no Editor/ scripts.
+sed -e 's/-define:UNITY_EDITOR;/-define:UNITY_ANDROID;/' -e '/Assets\/Scripts\/Editor\//d' -e 's/check\.dll/check_android.dll/' \
+  "$RSP" > "$OUT/check_android.rsp"
+"$E/NetCoreRuntime/dotnet.exe" "$E/DotNetSdkRoslyn/csc.dll" "@$OUT/check_android.rsp"
+echo "OK: Android player configuration compiles."

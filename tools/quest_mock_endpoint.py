@@ -9,7 +9,8 @@ and plays a fake_data mission as if the robot were live, plus a tiny robot sim t
 
 Publishes (to the Quest):  /mission/state  /map  /pose  /survey/bubbles  /survey/bubble_images
                            /survey/pins  /survey/readings  /camera/image/compressed
-Prints (from the Quest):   /cmd_vel_teleop  /estop  /voice/text
+Prints (from the Quest):   /cmd_vel_teleop  /estop  /voice/text  /voice/audio (saved as WAV; transcribed
+                           as a voice command if openai-whisper or faster-whisper is installed)
 
 Behaviour (mirrors the nav team's mission manager closely enough to test the UI):
   - "start" / "resume" on /voice/text -> SURVEYING, the mission replays; "stop" -> IDLE;
@@ -27,6 +28,7 @@ import json
 import math
 import socket
 import struct
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -117,6 +119,46 @@ def parse_twist(payload):
 
 def parse_bool(payload):
     return payload[4] != 0
+
+
+def parse_uint8_multiarray(payload):
+    """std_msgs/UInt8MultiArray -> data bytes (layout skipped)."""
+    body = payload[4:]
+    off = 0
+    dims = struct.unpack_from('<I', body, off)[0]; off += 4
+    for _ in range(dims):
+        n = struct.unpack_from('<I', body, off)[0]; off += 4 + n   # label
+        off += (-off) % 4
+        off += 8                                                    # size, stride
+    off += 4                                                        # data_offset
+    n = struct.unpack_from('<I', body, off)[0]; off += 4
+    return body[off:off + n]
+
+
+_whisper = None
+
+
+def transcribe(wav_path):
+    """Best effort: faster-whisper or openai-whisper if installed, else None."""
+    global _whisper
+    try:
+        if _whisper is None:
+            try:
+                from faster_whisper import WhisperModel
+                _whisper = ('faster', WhisperModel('small.en', compute_type='int8'))
+            except ImportError:
+                import whisper
+                _whisper = ('openai', whisper.load_model('small.en'))
+        kind, model = _whisper
+        if kind == 'faster':
+            segments, _ = model.transcribe(str(wav_path))
+            return ' '.join(seg.text for seg in segments).strip()
+        return model.transcribe(str(wav_path))['text'].strip()
+    except ImportError:
+        return None
+    except Exception as e:  # model download failure etc.
+        print(f'[mock] whisper failed: {e}')
+        return None
 
 
 def parse_string(payload):
@@ -367,6 +409,22 @@ def serve_client(conn, addr, robot, args):
                     robot.on_estop(parse_bool(payload))
                 elif topic == '/voice/text':
                     robot.on_voice(parse_string(payload))
+                elif topic == '/voice/audio':
+                    wav = parse_uint8_multiarray(payload)
+                    path = Path(tempfile.gettempdir()) / 'understory_voice_last.wav'
+                    path.write_bytes(wav)
+                    seconds = (len(wav) - 44) / (16000 * 2)
+                    print(f'[mock] /voice/audio {seconds:.1f}s -> {path}')
+                    text = transcribe(path)
+                    if text is None:
+                        print('[mock]   (install faster-whisper or openai-whisper to transcribe; '
+                              'the real pipeline: Whisper on the Jetson -> /voice/text)')
+                    else:
+                        print(f'[mock]   whisper: "{text}"')
+                        for word in ('start', 'stop', 'return', 'come back', 'go home', 'manual', 'capture', 'resume'):
+                            if word in text.lower():
+                                robot.on_voice(word)
+                                break
                 else:
                     print(f'[mock] (ignored) {topic} {len(payload)} bytes')
         except (ConnectionError, OSError):
