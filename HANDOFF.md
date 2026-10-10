@@ -549,6 +549,12 @@ installed on it."*
   Jetson's nodes kept running through the Pi's reboot and reconnected by themselves. Jetson: rebooted
   at about 4:20 PM; **run `~/start_understory.sh` after it comes up** (memory guard, power logger,
   then `jetson_up.sh`). Nothing starts by itself there except the two containers.
+- **4:22 PM, Jetson back up after the reboot.** `~/start_understory.sh` brought everything back with no
+  other step: mapping, Nav2, mission, panorama, `ai_node` and localizer. Checked from the Jetson at
+  4:32 PM: `/scan` 10.1 Hz, camera 15.4 Hz, `/detections` 9.8 Hz, `/mission/state` `IDLE`, TF
+  `map -> base_link` ok, 2.7 GB available (no Firefox open), 10 W, over-current counter 0 since boot.
+  The script's own "/detections" check failed twice and passed on the third try, as before. The script
+  used to hold the terminal after finishing (its two background helpers kept the output open); fixed.
 - Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
 
 ## 12. Rules for anyone (or any agent) continuing
