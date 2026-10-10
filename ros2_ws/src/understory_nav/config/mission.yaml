@@ -6,7 +6,7 @@ mission_manager:
     waypoints: ""
     survey_spacing: 1.0          # m between auto-planned bubbles
     survey_clearance: 0.35       # m from walls/unknown
-    max_points: 8
+    max_points: 8                # bubbles per survey (auto mode)
     spin_kp: 1.5
     spin_min_speed: 0.25         # rad/s; below this the mecanum wheels stall
     spin_max_speed: 0.6
@@ -15,5 +15,8 @@ mission_manager:
     settle_s: 0.4                # let the robot stop wobbling before the shot
     dwell_s: 0.6                 # hold still while the panorama grabs the frame
     capture_done_timeout_s: 15.0
+    goal_accept_timeout_s: 10.0  # Nav2 never answered (down/restarting): give up, skip the point
+    nav_timeout_s: 120.0         # longest drive to one point
     teleop_deadband: 0.05
     teleop_takes_over: true      # touching the sticks cancels autonomy -> MANUAL
+    teleop_grace_s: 1.0          # ...except within 1 s of a voice command

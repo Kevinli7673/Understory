@@ -4,6 +4,7 @@ Integrates /cmd_vel into a perfect odom->base_link TF and ray-casts a fake /scan
 against a small room with a few boxes. Use with sim.launch.py.
 """
 import math
+import random
 
 import rclpy
 from rclpy.node import Node
@@ -45,8 +46,9 @@ class FakeWorld(Node):
         self.odom_frame = 'odom'
         self.base_frame = 'base_link'
         self.laser_frame = self.declare_parameter('laser_frame', 'laser').value
-        self.beams = self.declare_parameter('beams', 360).value
+        self.beams = self.declare_parameter('beams', 400).value  # not 360: 30 deg turns must give new rays, like a real LiDAR
         self.max_range = self.declare_parameter('max_range', 8.0).value
+        self.noise = self.declare_parameter('range_noise', 0.01).value
         # World pose of the odom origin, so the map isn't centered on a wall.
         self.x0, self.y0 = 1.0, 1.0
         self.x = self.y = self.yaw = 0.0
@@ -88,7 +90,7 @@ class FakeWorld(Node):
         msg.range_max = self.max_range
         wx, wy = self.x0 + self.x, self.y0 + self.y
         msg.ranges = [raycast(wx, wy, self.yaw + msg.angle_min + i * msg.angle_increment, self.max_range)
-                      for i in range(self.beams)]
+                      + random.gauss(0.0, self.noise) for i in range(self.beams)]
         self.scan_pub.publish(msg)
 
 
