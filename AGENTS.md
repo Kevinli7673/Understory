@@ -14,9 +14,9 @@ Honest framing: an indoor mecanum robot on the venue floor stands in for the fie
 
 ## Current status
 
-_Updated Sat Oct 10, ~6:30 AM._
+_Updated Sat Oct 10, ~3:30 PM._
 
-- **Kevin (Quest app):** Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub`. `BubbleRingBuilder` + `TabletopMap` + `ViewSwitcher` (A / Tab, click a disc) tested in the editor, merged to `main`.
+- **Kevin (Quest app):** **Headset build works** (Quest 3S, OpenXR + Meta Quest, `com.knighthacks.understory`; first IL2CPP build ~13 min, then faster). Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub`. `BubbleRingBuilder` + `TabletopMap` + `ViewSwitcher` (A / Tab, click a disc) tested in the editor, merged to `main`.
   - **Written + compiling, not yet tested on ROS or the headset** (branch `quest-app`): `RosSurveySource` (survey topics, `/map`, `/mission/state`, `/pose` → hub; fake replay stops on the first real message), `TeleopController` (left stick drive/strafe, right stick turn → `/cmd_vel_teleop` only while held; **B** toggles `/estop`; editor WASD/QE/Space), `MissionPanel` (buttons → `/voice/text` keywords start/capture/resume/manual/return/stop), `SpeciesAlert` (popup + buzz per new species), `CameraScreen` (`/camera/image/compressed` behind the table), `ControllerPointer` (right-hand ray + trigger). One-click scene/player setup: **Understory → Set Up Quest Rig and Player Settings** (needs `com.unity.xr.openxr` + OpenXR/Meta Quest enabled on Android first).
   - Also on `quest-app`: `BeforeAfterOverlay` (earlier mission's invasives → removed/still here, same 0.5 m rule as the dashboard; panel "Compare before" / V), `SensorHeatmap` (readings in 25 cm cells; "Sensor map" / H), `BubbleNavigator` (floor arrows to neighboring bubbles in the bubble view), `TableGrab` (left grip moves the table), robot trail on the table, `SplatView` (AMD `scene.splat` / point cloud as a 3D miniature on the table via the `Understory/SplatBillboard` shader; panel "3D model" / M; fake `scene.splat` per mission from `generate.py`), `PinCard` (pick a pin → photo card from its bubble frame with a marker at the detection; pick again → stand in that bubble). New `mission_id` → hub archives the previous mission so before/after works live.
   - **Demo without the robot (headset or editor):** m1 replays on launch; press **Start survey** after it finishes → m2 (the re-survey) replays; **Compare before** → "7 invasive → 1 remaining".
@@ -42,7 +42,7 @@ _Updated Sat Oct 10, ~6:30 AM._
 | --- | --- | --- |
 | Robot | Pi (power bank) + ESP32 (motors on 6×AA in series, ~7.2 V) | Pi: LiDAR, camera, ESP32 serial bridge. ESP32: wheels with **300 ms cmd watchdog**, Grove sensor pod. |
 | Jetson Orin Nano | All live AI + robotics, wall power, no internet | GPU: NanoOWL (TensorRT), BioCLIP, Whisper small.en, stitching. CPU: slam_toolbox, Nav2, mission manager, twist_mux, localizer, logger. |
-| Quest 3 | Unity app via ROS-TCP-Connector → ROS-TCP-Endpoint on Jetson | Live view, tabletop map twin, 360° bubbles, splat view, sticks, push-to-talk, e-stop. |
+| Quest 3S | Unity app via ROS-TCP-Connector → ROS-TCP-Endpoint on Jetson | Live view, tabletop map twin, 360° bubbles, splat view, sticks, push-to-talk, e-stop. |
 | Cloud (after mission) | HF Hub dataset, Neon (Postgres + pgvector), AMD Radeon PRO W7900 | Sync script + Streamlit dashboard + Gaussian splat. |
 
 **Mode A** (build first): sensors plugged directly into the Jetson. **Mode B**: Pi on robot, Jetson at table, phone hotspot. ROS 2 makes the switch code-free — don't write code that assumes either mode.
