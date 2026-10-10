@@ -40,6 +40,15 @@ namespace Understory
         /// <summary>Half width (x) and half depth (y) of the slab top, root-local meters.</summary>
         public Vector2 HalfExtents { get; private set; }
         public Material BaseMaterial => material;
+        /// <summary>Parent for anything placed in map coordinates (local positions from BoardPosition).</summary>
+        public Transform MapRoot => mapRoot;
+        /// <summary>Extra status lines from attachments (before/after, sensor map); null/empty = no line.</summary>
+        public readonly List<Func<string>> StatusProviders = new List<Func<string>>();
+        /// <summary>Board meters per map meter.</summary>
+        public float Scale => scale;
+
+        /// <summary>ROS map-frame (x, y) -> MapRoot-local position on the board. Changes on LayoutChanged.</summary>
+        public Vector3 BoardPosition(float x, float y) => BoardPos(x, y);
 
         static readonly Color SlabColor = new Color(0.10f, 0.11f, 0.12f);
         static readonly Color BubbleColor = new Color(0.2f, 0.85f, 0.95f);
@@ -191,6 +200,7 @@ namespace Understory
             robot.SetActive(true);
             robot.transform.localPosition = BoardPos(x, y);
             robot.transform.localRotation = RosCoords.ToUnityRotation(yaw);
+            AddTrailPoint(x, y);
         }
 
         // ---- hub events ----
@@ -273,12 +283,38 @@ namespace Understory
             placed.Clear();
             robotPos = null;
             robot.SetActive(false);
+            trailRos.Clear();
+            RedrawTrail();
             map = null;
             Relayout();
             UpdateStatus();
         }
 
         // ---- layout ----
+
+        // ---- robot trail (where the robot has driven this mission) ----
+
+        const float TrailStep = 0.05f; // map meters between recorded points
+        const int TrailMax = 2000;
+        readonly List<Vector2> trailRos = new List<Vector2>();
+        LineRenderer trail;
+
+        void AddTrailPoint(float x, float y)
+        {
+            var p = new Vector2(x, y);
+            if (trailRos.Count > 0 && (trailRos[trailRos.Count - 1] - p).sqrMagnitude < TrailStep * TrailStep) return;
+            trailRos.Add(p);
+            if (trailRos.Count > TrailMax) trailRos.RemoveRange(0, trailRos.Count - TrailMax);
+            RedrawTrail();
+        }
+
+        void RedrawTrail()
+        {
+            if (trail == null) return;
+            trail.positionCount = trailRos.Count;
+            for (int i = 0; i < trailRos.Count; i++)
+                trail.SetPosition(i, BoardPos(trailRos[i].x, trailRos[i].y) + Vector3.up * 0.002f);
+        }
 
         Vector3 BoardPos(float x, float y) =>
             (RosCoords.ToUnity(x, y) - RosCoords.ToUnity(center.x, center.y)) * scale;
@@ -321,6 +357,7 @@ namespace Understory
             placed.RemoveAll(e => e.t == null);
             foreach (var (t, ros) in placed) t.localPosition = BoardPos(ros.x, ros.y);
             if (robotPos.HasValue) robot.transform.localPosition = BoardPos(robotPos.Value.x, robotPos.Value.y);
+            RedrawTrail();
 
             status.transform.localPosition = new Vector3(0f, 0.005f, -(spanX * scale / 2f + Margin + 0.01f));
         }
@@ -371,6 +408,19 @@ namespace Understory
             nose.transform.localPosition = new Vector3(0f, 0.007f, 0.016f); // +z = robot forward
             robot.SetActive(false);
 
+            var trailGo = new GameObject("Trail");
+            trailGo.transform.SetParent(mapRoot, false);
+            trail = trailGo.AddComponent<LineRenderer>();
+            trail.useWorldSpace = false; // MapRoot-local, like the markers
+            trail.widthMultiplier = 0.003f;
+            trail.numCornerVertices = 2;
+            trail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            trail.receiveShadows = false;
+            var trailMat = WorldUI.Tinted(material, null, new Color(1f, 0.75f, 0.2f));
+            owned.Add(trailMat);
+            trail.sharedMaterial = trailMat;
+            trail.positionCount = 0;
+
             status = WorldUI.MakeLabel(root, "", Color.white, 0.025f, TextAnchor.UpperCenter);
             status.transform.localRotation = Quaternion.Euler(60f, 0f, 0f); // lie back toward the viewer
 
@@ -387,7 +437,13 @@ namespace Understory
             string line1 = $"{state}   ·   invasives {invasive}   ·   plants {total}   ·   spots {hub.Bubbles.Count}";
             string link = rosSource != null ? rosSource.StatusText : "FAKE";
             string estop = teleop != null && teleop.EStopped ? "   ·   <color=#ff4433>E-STOP</color>" : "";
-            status.text = $"{line1}\n<size=36>{link}{estop}</size>";
+            var text = $"{line1}\n<size=36>{link}{estop}</size>";
+            foreach (var provider in StatusProviders)
+            {
+                string extra = provider();
+                if (!string.IsNullOrEmpty(extra)) text += $"\n<size=36>{extra}</size>";
+            }
+            status.text = text;
         }
 
         GameObject Primitive(PrimitiveType type, string name, Color color, Transform parent = null)

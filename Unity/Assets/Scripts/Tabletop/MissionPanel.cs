@@ -19,6 +19,9 @@ namespace Understory
         [SerializeField] TabletopMap table;
 
         public const string Topic = "/voice/text";
+        /// <summary>Local-only buttons start with '#': raised on Pressed, never published.</summary>
+        public const string CompareKeyword = "#compare";
+        public const string SensorsKeyword = "#sensors";
 
         static readonly (string label, string keyword, Color color)[] Buttons =
         {
@@ -28,6 +31,8 @@ namespace Understory
             ("Manual", "manual", new Color(0.45f, 0.4f, 0.15f)),
             ("Return home", "return", new Color(0.45f, 0.4f, 0.15f)),
             ("Stop mission", "stop", new Color(0.6f, 0.2f, 0.15f)),
+            ("Compare before", CompareKeyword, new Color(0.4f, 0.25f, 0.55f)),
+            ("Sensor map", SensorsKeyword, new Color(0.4f, 0.25f, 0.55f)),
         };
 
         const float ButtonW = 0.13f, ButtonD = 0.045f, Gap = 0.012f, Tilt = 35f;
@@ -96,9 +101,11 @@ namespace Understory
         {
             var keyword = Buttons[i].keyword;
             flashUntil[i] = Time.unscaledTime + 0.2f;
-            if (ros != null) ros.Publish(Topic, new StringMsg(keyword));
+            bool local = keyword.StartsWith("#");
+            if (!local && ros != null) ros.Publish(Topic, new StringMsg(keyword));
             Haptics.Buzz(this, 0.3f, 0.06f, OVRInput.Controller.RTouch);
-            Debug.Log($"[MissionPanel] {Buttons[i].label} -> {Topic} \"{keyword}\"{(ros == null ? " (ROS off, not sent)" : "")}");
+            if (local) Debug.Log($"[MissionPanel] {Buttons[i].label}");
+            else Debug.Log($"[MissionPanel] {Buttons[i].label} -> {Topic} '{keyword}'{(ros == null ? " (ROS off, not sent)" : "")}");
             Pressed?.Invoke(keyword);
         }
 

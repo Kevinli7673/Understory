@@ -1,10 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace Understory
 {
@@ -59,12 +57,7 @@ namespace Understory
 
         public string MissionRoot()
         {
-            if (!string.IsNullOrEmpty(missionFolderOverride)) return missionFolderOverride;
-#if UNITY_EDITOR
-            return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "fake_data", "missions", missionId));
-#else
-            return Application.streamingAssetsPath + "/fake_data/missions/" + missionId;
-#endif
+            return !string.IsNullOrEmpty(missionFolderOverride) ? missionFolderOverride : MissionFiles.Root(missionId);
         }
 
         IEnumerator Run()
@@ -77,11 +70,11 @@ namespace Understory
 
                 string bubblesText = null, pinsText = null, readingsText = null, yaml = null;
                 byte[] pgm = null;
-                yield return LoadText(root, "bubbles.jsonl", s => bubblesText = s);
-                yield return LoadText(root, "pins.jsonl", s => pinsText = s);
-                yield return LoadText(root, "readings.jsonl", s => readingsText = s);
-                yield return LoadText(root, "map.yaml", s => yaml = s);
-                yield return LoadBytes(root, "map.pgm", b => pgm = b);
+                yield return MissionFiles.LoadText(root, "bubbles.jsonl", s => bubblesText = s);
+                yield return MissionFiles.LoadText(root, "pins.jsonl", s => pinsText = s);
+                yield return MissionFiles.LoadText(root, "readings.jsonl", s => readingsText = s);
+                yield return MissionFiles.LoadText(root, "map.yaml", s => yaml = s);
+                yield return MissionFiles.LoadBytes(root, "map.pgm", b => pgm = b);
 
                 if (bubblesText == null)
                 {
@@ -130,13 +123,13 @@ namespace Understory
             foreach (var f in b.Frames)
             {
                 byte[] jpg = null;
-                yield return LoadBytes(root, $"frames/{b.BubbleId}_{f.Index}.jpg", x => jpg = x);
+                yield return MissionFiles.LoadBytes(root, $"frames/{b.BubbleId}_{f.Index}.jpg", x => jpg = x);
                 if (jpg != null) hub.HandleBubbleImage(f.ImageFrameId(b.BubbleId), jpg);
             }
             if (b.Stitched)
             {
                 byte[] jpg = null;
-                yield return LoadBytes(root, $"frames/{b.BubbleId}_pano.jpg", x => jpg = x);
+                yield return MissionFiles.LoadBytes(root, $"frames/{b.BubbleId}_pano.jpg", x => jpg = x);
                 if (jpg != null) hub.HandleBubbleImage($"{b.BubbleId}/pano", jpg);
             }
         }
@@ -192,26 +185,5 @@ namespace Understory
             // Stable sort: equal timestamps keep insertion order.
             return ev.Select((e, i) => (e, i)).OrderBy(x => x.e.T).ThenBy(x => x.i).Select(x => x.e).ToList();
         }
-
-        // ---- file loading (UnityWebRequest so the same code reads Android StreamingAssets) ----
-
-        static string ToUri(string root, string rel)
-        {
-            string path = root.TrimEnd('/', '\\') + "/" + rel;
-            return path.Contains("://") ? path : new Uri(path).AbsoluteUri;
-        }
-
-        static IEnumerator LoadBytes(string root, string rel, Action<byte[]> done)
-        {
-            using (var req = UnityWebRequest.Get(ToUri(root, rel)))
-            {
-                yield return req.SendWebRequest();
-                if (req.result == UnityWebRequest.Result.Success) done(req.downloadHandler.data);
-                else Debug.LogWarning($"[FakeSurveySource] Missing {rel}: {req.error}");
-            }
-        }
-
-        static IEnumerator LoadText(string root, string rel, Action<string> done) =>
-            LoadBytes(root, rel, b => done(System.Text.Encoding.UTF8.GetString(b)));
     }
 }

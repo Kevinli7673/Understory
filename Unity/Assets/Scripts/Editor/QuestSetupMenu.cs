@@ -80,6 +80,8 @@ namespace Understory.EditorTools
                 if (hub.GetComponent<MissionPanel>() == null) Undo.AddComponent<MissionPanel>(hub.gameObject);
                 if (hub.GetComponent<SpeciesAlert>() == null) Undo.AddComponent<SpeciesAlert>(hub.gameObject);
                 if (hub.GetComponent<CameraScreen>() == null) Undo.AddComponent<CameraScreen>(hub.gameObject);
+                if (hub.GetComponent<BeforeAfterOverlay>() == null) Undo.AddComponent<BeforeAfterOverlay>(hub.gameObject);
+                if (hub.GetComponent<SensorHeatmap>() == null) Undo.AddComponent<SensorHeatmap>(hub.gameObject);
             }
             else Debug.LogWarning("[QuestSetup] No SurveyHub in the scene; ROS components not added.");
 
