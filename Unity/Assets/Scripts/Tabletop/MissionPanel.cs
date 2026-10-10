@@ -46,6 +46,9 @@ namespace Understory
 
         WorldButtons grid;
         ROSConnection ros;
+        const float RepeatGuard = 2f;
+        string lastCommand;
+        float lastCommandTime = -100f;
 
         void Start()
         {
@@ -97,8 +100,20 @@ namespace Understory
             var keyword = Buttons[i].keyword;
             grid.Flash(i);
             bool local = keyword.StartsWith("#");
-            if (!local && ros != null) ros.Publish(Topic, new StringMsg(keyword));
             Haptics.Buzz(this, 0.3f, 0.06f, OVRInput.Controller.RTouch);
+            // Robot commands: ignore a repeat of the same command within RepeatGuard seconds (e.g. "Capture here"
+            // mashed 5x would queue 5 full spins on the real robot). The flash + buzz still confirm the press.
+            if (!local && keyword == lastCommand && Time.unscaledTime - lastCommandTime < RepeatGuard)
+            {
+                Debug.Log($"[MissionPanel] {Buttons[i].label}: repeat within {RepeatGuard}s ignored");
+                return;
+            }
+            if (!local)
+            {
+                lastCommand = keyword;
+                lastCommandTime = Time.unscaledTime;
+                if (ros != null) ros.Publish(Topic, new StringMsg(keyword));
+            }
             if (local) Debug.Log($"[MissionPanel] {Buttons[i].label}");
             else Debug.Log($"[MissionPanel] {Buttons[i].label} -> {Topic} '{keyword}'{(ros == null ? " (ROS off, not sent)" : "")}");
             Pressed?.Invoke(keyword);

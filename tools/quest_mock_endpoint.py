@@ -136,6 +136,19 @@ def parse_uint8_multiarray(payload):
 
 
 _whisper = None
+# Hint for Whisper: the words we expect. Same idea for the Jetson Whisper node.
+COMMAND_PROMPT = 'Robot commands: start survey, stop, return home, come back, manual, capture, resume.'
+
+
+def command_from_text(text):
+    """Whisper text -> mission keyword, forgiving of short-clip mishearings ("Sorry, survey." -> start)."""
+    t = text.lower()
+    # Most specific first; "survey" alone means start, so it's checked last ("stop the survey" -> stop).
+    for word, keys in (('stop', ('stop',)), ('return', ('return', 'come back', 'go home')), ('manual', ('manual',)),
+                       ('capture', ('capture',)), ('resume', ('resume', 'continue')), ('start', ('start', 'survey'))):
+        if any(k in t for k in keys):
+            return word
+    return None
 
 
 def transcribe(wav_path):
@@ -156,9 +169,9 @@ def transcribe(wav_path):
         with wave.open(str(wav_path)) as w:
             audio = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(np.float32) / 32768.0
         if kind == 'faster':
-            segments, _ = model.transcribe(audio, language='en')
+            segments, _ = model.transcribe(audio, language='en', initial_prompt=COMMAND_PROMPT)
             return ' '.join(seg.text for seg in segments).strip()
-        return model.transcribe(audio, language='en')['text'].strip()
+        return model.transcribe(audio, language='en', initial_prompt=COMMAND_PROMPT)['text'].strip()
     except ImportError:
         return None
     except Exception as e:  # model download failure etc.
@@ -312,6 +325,9 @@ class MockRobot:
                 self.return_t = time.time()
             elif word == 'manual':
                 self.state = 'MANUAL'      # survey paused; "resume" continues it
+            elif word == 'capture' and (self.capture_pending or self.capture_until):
+                print('[mock]   already capturing, ignored')
+                return
             elif word == 'capture' and not self.estop:
                 # Like the real mission manager: spin and photograph HERE, then carry on as before.
                 if not self.capture_pending and not self.capture_until:
@@ -507,10 +523,11 @@ def serve_client(conn, addr, robot, args):
                               'the real pipeline: Whisper on the Jetson -> /voice/text)')
                     else:
                         print(f'[mock]   whisper: "{text}"')
-                        for word in ('start', 'stop', 'return', 'come back', 'go home', 'manual', 'capture', 'resume'):
-                            if word in text.lower():
-                                robot.on_voice(word)
-                                break
+                        word = command_from_text(text)
+                        if word:
+                            robot.on_voice(word)
+                        else:
+                            print('[mock]   (no command recognized)')
                 else:
                     print(f'[mock] (ignored) {topic} {len(payload)} bytes')
         except (ConnectionError, OSError):
