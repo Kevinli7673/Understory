@@ -11,6 +11,7 @@ namespace Understory
     {
         [SerializeField] TabletopMap table;
         [SerializeField] MissionPanel panel;
+        [SerializeField] BubbleNavigator navigator;
         [Tooltip("URP/Unlit material for the ray. Auto-assigned when the component is added.")]
         [SerializeField] Material material;
         [SerializeField] OVRInput.Controller controller = OVRInput.Controller.RTouch;
@@ -25,6 +26,7 @@ namespace Understory
         {
             if (table == null) table = FindAnyObjectByType<TabletopMap>();
             if (panel == null) panel = FindAnyObjectByType<MissionPanel>();
+            if (navigator == null) navigator = FindAnyObjectByType<BubbleNavigator>();
             var rig = FindAnyObjectByType<OVRCameraRig>();
             if (rig != null) trackingSpace = rig.trackingSpace;
             if (material == null) material = WorldUI.FallbackUnlit();
@@ -48,7 +50,9 @@ namespace Understory
 
         void Update()
         {
-            bool active = XRSettings.isDeviceActive && trackingSpace != null && table != null && table.Visible
+            bool onTable = table != null && table.Visible;
+            bool onFloor = navigator != null && navigator.IsShowing;
+            bool active = XRSettings.isDeviceActive && trackingSpace != null && (onTable || onFloor)
                           && OVRInput.IsControllerConnected(controller);
             line.enabled = active;
             if (!active) return;
@@ -61,7 +65,11 @@ namespace Understory
             if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, controller))
             {
                 var ray = new Ray(origin, dir);
-                if (panel == null || !panel.TrySelect(ray)) table.TrySelect(ray); // buttons first, then capture spots
+                if (onTable)
+                {
+                    if (panel == null || !panel.TrySelect(ray)) table.TrySelect(ray); // buttons first, then capture spots
+                }
+                else navigator.TrySelect(ray); // bubble view: floor arrows to neighboring bubbles
             }
         }
 
