@@ -1,0 +1,19 @@
+mission_manager:
+  ros__parameters:
+    mission_id: m1
+    frames_per_bubble: 12        # one /survey/capture per 30 deg stop; panorama must agree
+    # Fixed survey points "x,y; x,y" in the map frame. Empty = auto-plan from /map.
+    waypoints: ""
+    survey_spacing: 1.0          # m between auto-planned bubbles
+    survey_clearance: 0.35       # m from walls/unknown
+    max_points: 8
+    spin_kp: 1.5
+    spin_min_speed: 0.25         # rad/s; below this the mecanum wheels stall
+    spin_max_speed: 0.6
+    yaw_tolerance: 0.05          # rad
+    step_timeout_s: 8.0          # give up on a 30 deg turn and capture anyway
+    settle_s: 0.4                # let the robot stop wobbling before the shot
+    dwell_s: 0.6                 # hold still while the panorama grabs the frame
+    capture_done_timeout_s: 15.0
+    teleop_deadband: 0.05
+    teleop_takes_over: true      # touching the sticks cancels autonomy -> MANUAL

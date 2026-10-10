@@ -1,0 +1,17 @@
+# Priority: e-stop > Quest teleop > autonomy. Output remapped to /cmd_vel in nav.launch.py.
+twist_mux:
+  ros__parameters:
+    topics:
+      teleop:
+        topic: /cmd_vel_teleop
+        timeout: 0.5
+        priority: 100
+      autonomy:
+        topic: /cmd_vel_auto
+        timeout: 0.5
+        priority: 10
+    locks:
+      estop:
+        topic: /estop
+        timeout: 0.0   # no timeout: locked until the Quest publishes false
+        priority: 255
