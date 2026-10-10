@@ -19,5 +19,6 @@ python fake_data/generate.py     # needs Pillow; deterministic, safe to re-run
   If a pin's box isn't where Unity puts the pin, the yaw/coordinate math is wrong somewhere.
 - Readings omit `uv` on ~20% of lines and `air_quality` on 2 of 3, to test "missing sensors are omitted".
 
-**Open question for perception:** the pano image convention isn't in the contract yet. These fakes use
-center = yaw 0, left edge = +π, right edge = −π (u = (π − yaw) / 2π, left-to-right = turning clockwise).
+Stitched bubbles get both the frames and a `_pano.jpg` (the proposed contract: frames always, pano extra).
+The fake pano uses center = yaw 0, left edge = +π, right edge = −π (u = (π − yaw) / 2π). Real cv2 stitcher
+output has no known start yaw, which is why the Quest app shows the frame ring by default.

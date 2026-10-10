@@ -1,20 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
 
 namespace Understory
 {
     /// <summary>
     /// Immersive 360° bubble view. Wraps one bubble around the viewer:
-    ///  - stitched pano ("&lt;bubble_id&gt;/pano") as one cylinder, or
-    ///  - fallback: each frame as a curved panel at its yaw (reprojected pinhole -> cylinder).
+    ///  - default: each frame as a curved panel at its yaw (reprojected pinhole -> cylinder), so pins line up, or
+    ///  - the stitched pano ("&lt;bubble_id&gt;/pano") as one cylinder when no frames arrived (or preferPano).
     /// It's a band, not a sphere; a dark gradient sphere fills above and below.
     /// Pins for the bubble float at their bearing.
     ///
-    /// Editor keys: [ / ] previous/next bubble, R toggle ring vs pano.
+    /// Editor keys: [ / ] previous/next bubble, R toggle preferPano.
     /// </summary>
     public class BubbleRingBuilder : MonoBehaviour
     {
@@ -26,8 +23,9 @@ namespace Understory
         [SerializeField] float radius = 3f;
         [Tooltip("Switch to each new bubble as it arrives (live mode).")]
         [SerializeField] bool autoShowLatest = true;
-        [Tooltip("Ignore the stitched pano and always show the frame ring.")]
-        [SerializeField] bool forceRing;
+        [Tooltip("Show the stitched pano even when frames exist. Off by default: frames carry exact yaws, " +
+                 "while stitcher output has no known start heading, so pins can't be placed on it reliably.")]
+        [SerializeField] bool preferPano;
         [Tooltip("Only show the middle of each frame (one yaw step wide) so panels don't overlap.")]
         [SerializeField] bool cropToSpacing = true;
         [SerializeField] bool showPins = true;
@@ -42,6 +40,14 @@ namespace Understory
 
         public string CurrentBubbleId { get; private set; }
 
+        bool visible = true;
+        /// <summary>Hidden still tracks bubbles/images, so showing it again is instant.</summary>
+        public bool Visible
+        {
+            get => visible;
+            set { visible = value; if (content != null) content.SetActive(value); }
+        }
+
         GameObject content;
         readonly Dictionary<int, GameObject> panels = new Dictionary<int, GameObject>();
         readonly List<Object> owned = new List<Object>(); // runtime meshes/materials to destroy
@@ -53,8 +59,7 @@ namespace Understory
             if (follow == null && Camera.main != null) follow = Camera.main.transform;
             if (panelMaterial == null)
             {
-                panelMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
-                panelMaterial.SetFloat("_Cull", 0f);
+                panelMaterial = WorldUI.FallbackUnlit();
                 Debug.LogWarning("[BubbleRing] No panel material assigned; created one at runtime (may be stripped in builds).");
             }
             if (hub == null) { Debug.LogError("[BubbleRing] No SurveyHub in scene."); enabled = false; return; }
@@ -91,7 +96,7 @@ namespace Understory
             if (kb == null) return;
             if (kb.rightBracketKey.wasPressedThisFrame) Step(+1);
             if (kb.leftBracketKey.wasPressedThisFrame) Step(-1);
-            if (kb.rKey.wasPressedThisFrame) { forceRing = !forceRing; Rebuild(); }
+            if (kb.rKey.wasPressedThisFrame) { preferPano = !preferPano; Rebuild(); }
         }
 
         // ---- public API (controllers / map twin call these) ----
@@ -132,10 +137,15 @@ namespace Understory
             var b = hub.Bubbles[CurrentBubbleId];
             if (suffix == "pano")
             {
-                if (b.Stitched && !forceRing) Rebuild();
+                if (UsePano(b)) Rebuild();
                 return;
             }
-            if (!int.TryParse(suffix, out int index) || !panels.ContainsKey(index)) return; // pano mode, or unknown frame
+            if (!int.TryParse(suffix, out int index)) return;
+            if (!panels.ContainsKey(index))
+            {
+                if (!UsePano(b)) Rebuild(); // first frame after showing the pano: switch to the ring
+                return;
+            }
             var frame = b.Frames.Find(f => f.Index == index);
             if (frame == null) return;
             Destroy(panels[index]);
@@ -161,11 +171,12 @@ namespace Understory
             if (CurrentBubbleId == null || !hub.Bubbles.TryGetValue(CurrentBubbleId, out var b)) return;
 
             content = new GameObject($"Bubble {b.BubbleId}");
+            content.SetActive(visible);
             content.transform.SetPositionAndRotation(follow != null ? follow.position : transform.position, Quaternion.identity);
             BuildBackdrop();
 
-            if (b.Stitched && !forceRing && hub.BubbleImages.TryGetValue($"{b.BubbleId}/pano", out var pano))
-                BuildPano(pano);
+            if (UsePano(b))
+                BuildPano(hub.BubbleImages[$"{b.BubbleId}/pano"]);
             else
                 foreach (var f in b.Frames)
                 {
@@ -176,6 +187,16 @@ namespace Understory
             if (showPins)
                 foreach (var p in hub.Pins.Values)
                     if (p.BubbleId == b.BubbleId) BuildPinMarker(p);
+        }
+
+        /// <summary>Frame ring by default (exact yaws); the pano only if asked for or no frame images arrived.</summary>
+        bool UsePano(Bubble b)
+        {
+            if (!hub.BubbleImages.ContainsKey($"{b.BubbleId}/pano")) return false;
+            if (preferPano) return true;
+            foreach (var f in b.Frames)
+                if (hub.BubbleImages.ContainsKey(f.ImageFrameId(b.BubbleId))) return false;
+            return true;
         }
 
         void ClearContent()
@@ -312,19 +333,9 @@ namespace Understory
             marker.transform.localScale = Vector3.one * 0.08f;
             SetLook(marker, null, color);
 
-            var label = new GameObject("Label");
-            label.transform.SetParent(marker.transform, false);
-            label.transform.position = marker.transform.position + Vector3.up * 0.12f;
-            label.transform.rotation = Quaternion.LookRotation(dir); // readable from the center
-            label.transform.localScale = Vector3.one * (0.025f / 0.08f); // ~12 cm text at 48 pt
-            var tm = label.AddComponent<TextMesh>();
-            tm.text = $"{p.Label}\n{p.Confidence:P0}";
-            tm.anchor = TextAnchor.LowerCenter;
-            tm.alignment = TextAlignment.Center;
-            tm.fontSize = 48;
-            tm.color = color;
-            tm.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            label.GetComponent<MeshRenderer>().sharedMaterial = tm.font.material;
+            var label = WorldUI.MakeLabel(marker.transform, $"{p.Label}\n{p.Confidence:P0}", color, 0.17f).transform;
+            label.position = marker.transform.position + Vector3.up * 0.12f;
+            label.rotation = Quaternion.LookRotation(dir); // readable from the center
         }
 
         GameObject MakeMeshObject(string name, Vector3[] verts, Vector2[] uvs, int[] tris)
@@ -341,14 +352,9 @@ namespace Understory
 
         void SetLook(GameObject go, Texture tex, Color color)
         {
-            var mat = new Material(panelMaterial);
-            mat.mainTexture = tex;
-            mat.color = color;
+            var mat = WorldUI.Tinted(panelMaterial, tex, color);
             owned.Add(mat);
-            var mr = go.GetComponent<MeshRenderer>();
-            mr.sharedMaterial = mat;
-            mr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            mr.receiveShadows = false;
+            WorldUI.Apply(go, mat);
         }
 
 #if UNITY_EDITOR
@@ -357,14 +363,7 @@ namespace Understory
         void Reset()
         {
             hub = FindAnyObjectByType<SurveyHub>();
-            const string path = "Assets/Materials/BubblePanel.mat";
-            panelMaterial = AssetDatabase.LoadAssetAtPath<Material>(path);
-            if (panelMaterial != null) return;
-            panelMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit")) { name = "BubblePanel" };
-            panelMaterial.SetFloat("_Cull", 0f); // Render Face: Both
-            if (!AssetDatabase.IsValidFolder("Assets/Materials")) AssetDatabase.CreateFolder("Assets", "Materials");
-            AssetDatabase.CreateAsset(panelMaterial, path);
-            AssetDatabase.SaveAssets();
+            panelMaterial = WorldUI.UnlitMaterialAsset();
         }
 #endif
     }
