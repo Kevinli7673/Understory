@@ -21,6 +21,9 @@ namespace Understory
         [Tooltip("How far below the eyes the floor arrows sit.")]
         [SerializeField] float floorDrop = 1.25f;
         [SerializeField] float pickRadius = 0.25f;
+        [Tooltip("Street View style: only the nearest spot per direction; a farther spot within this many degrees is " +
+                 "reached through the nearer one (otherwise their arrows and labels overlap).")]
+        [SerializeField] float minSeparationDeg = 20f;
 
         static readonly Color ArrowColor = new Color(0.3f, 0.9f, 1f);
 
@@ -105,13 +108,25 @@ namespace Understory
             builtCount = hub.Bubbles.Count;
             if (!hub.Bubbles.TryGetValue(builtFor, out var here)) return;
 
+            // Nearest first, so a nearer spot claims its direction before a farther one behind it.
+            var neighbors = new List<(Bubble b, float dist, float bearing)>();
             foreach (var other in hub.Bubbles.Values)
             {
                 if (other.BubbleId == here.BubbleId) continue;
-                float dx = other.X - here.X, dy = other.Y - here.Y;
-                float dist = Mathf.Sqrt(dx * dx + dy * dy);
-                if (dist > maxDistance || dist < 0.05f) continue;
-                float bearing = Mathf.Atan2(dy, dx); // ROS yaw from here to there
+                float ox = other.X - here.X, oy = other.Y - here.Y;
+                float d = Mathf.Sqrt(ox * ox + oy * oy);
+                if (d <= maxDistance && d >= 0.05f) neighbors.Add((other, d, Mathf.Atan2(oy, ox)));
+            }
+            neighbors.Sort((a, c) => a.dist.CompareTo(c.dist));
+            var taken = new List<float>();
+
+            foreach (var (other, dist, bearing) in neighbors)
+            {
+                bool crowded = false;
+                foreach (var t in taken)
+                    if (Mathf.Abs(Mathf.DeltaAngle(t * Mathf.Rad2Deg, bearing * Mathf.Rad2Deg)) < minSeparationDeg) crowded = true;
+                if (crowded) continue;
+                taken.Add(bearing);
                 var dir = RosCoords.ToUnityDirection(bearing);
 
                 var arrow = new GameObject($"To {other.BubbleId}").transform;
