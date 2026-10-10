@@ -53,6 +53,8 @@ Panel buttons (right of the table): Start survey, Capture here, Resume, Manual, 
   ros_tcp_endpoint protocol, simulates the robot and prints what the app sends. Editor connects to
   127.0.0.1; on the Quest push the laptop IP (below).
 - **Compile check without focusing Unity:** `bash tools/check_unity_scripts.sh` (editor + Android passes).
+- **ROS wire format:** `bash tools/test_ros_compat.sh` round-trips messages between the mock and the real
+  ROS-TCP-Connector message classes (Unity's .NET, no editor).
 - **Jetson / mock IP on the headset:**
   `echo 192.168.x.y > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`,
   then restart the app. The table's status line shows `LIVE <ip>` or `FAKE · connecting <ip>`.
