@@ -478,7 +478,7 @@ installed on it."*
 - Left running on the Pi: sensors, Foxglove, Quest endpoint and the Whisper node. Detector, species
   and localizer were stopped again (the Pi reached 70 °C in two minutes with them on).
 
-**Session 8, Sat 12:45 to 3:10 PM, on the Jetson (three chats; the board froze once).** Branch `jetson-bringup`.
+**Session 8, Sat 12:45 to 3:40 PM, on the Jetson (three chats; the board froze once).** Branch `jetson-bringup`.
 - **GPU image** `scout-ros-ai-gpu` built from `pi/jetson/Dockerfile.gpu` (13.6 GB, PyTorch 2.14.1 + CUDA).
   The models were copied from the Pi's cache, so the Jetson runs offline.
 - **The board froze at about 1:50 PM** (watchdog reset) with detector, species and Whisper each in their
@@ -492,9 +492,9 @@ installed on it."*
   five-photo self-test PASS 5 of 5 with the same confidences as full precision, `/detections` 4.4 Hz
   in the self-test and 8.1 Hz on the live camera (Pi CPU: 0.25 Hz). Peak board power 9.7 W; it was
   14.6 W at full precision.
-- **Memory is still tight.** With the AI, Whisper, Nav2 and a desktop with Firefox open, about 1.0 GB
-  stays available and it dips to 0.7 GB while the models load. `~/fetch_ws/logs/mem_guard.sh` kills the
-  AI nodes under 700 MB so the board cannot freeze again; it fired twice. Closing Firefox frees about
+- **Memory is still tight.** With the AI, Whisper, Nav2 and a desktop with Firefox open, about 0.9 GB
+  stays available and it dips under 0.7 GB while the models load or a clip is transcribed. `~/fetch_ws/logs/mem_guard.sh` kills the
+  AI nodes under 700 MB so the board cannot freeze again; it fired four times. Closing Firefox frees about
   1 GB. The Jetson image has no zram swap; turning it on needs sudo and was not done.
 - **Voice on the Jetson CPU** (`whisper-base.en`, synthetic clips, ROS domain 43): "come back home",
   "keep going" and "manual" correct, "start survey" heard as "star survey", 3.5 to 6 s per clip.
@@ -505,19 +505,31 @@ installed on it."*
   counter has not moved in an hour. `~/fetch_ws/logs/power_watch.py` logs it once a second.
 - `scout-ai` is now created with `--init`. Without it stopped nodes stayed as zombies, and the
   script's `pgrep` checks reported them as running.
-- **OPEN, blocks two-machine running: the Pi drops off the hotspot whenever the Jetson subscribes to
-  its topics.** Seen from 2:17 PM on; before that it ran for an hour. With nothing subscribed the Pi
-  pings at 0% loss. Subscribing to `/scan` alone from the Jetson gave 75% loss within 20 s, and the Pi
-  came back about 30 s after the Jetson's ROS nodes were stopped (three trials). The Pi's kernel log
-  shows its Wi-Fi chip stalling (`brcmfmac: brcmf_sdio_bus_rxctl: resumed on timeout`, and SDIO write
-  errors at 2:41 PM) and 17,862 failed transmissions. Both machines are on 2.4 GHz channel 6.
-  Not fixed. Tried on the Pi, at run time only, lost on restart: JPEG quality 95 to 60
-  (`ros2 param set /camera image_raw.compressed.jpeg_quality 60`, frames 55 KB to 22 KB) and Wi-Fi
-  power save off. Neither was enough. Not tried: the hotspot on 5 GHz (iPhone: turn off "Maximize
-  Compatibility"), an Ethernet cable between the two, reloading the Pi's Wi-Fi driver.
-- Left on the Jetson: containers `scout` and `scout-ai` up, **no ROS nodes running** (they take the Pi
-  off the network). Start with
-  `AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia AI_ONE_PROCESS=1 pi/jetson/jetson_up.sh`.
+- **Pi dropping off the hotspot: fixed by moving the hotspot to 5 GHz** (iPhone: turn off "Maximize
+  Compatibility", then restart the hotspot). On 2.4 GHz channel 6, from 2:17 PM, the Pi stopped answering
+  within 20 s whenever the Jetson subscribed to its topics, and came back 30 s after the Jetson's ROS
+  nodes stopped (three trials); its kernel log showed the Wi-Fi chip stalling (`brcmf_sdio_bus_rxctl:
+  resumed on timeout`). On 5 GHz (3:20 PM on, after a Pi power cycle): 0% ping loss, `/scan` 10.0 Hz and
+  camera 15.0 Hz on the Jetson with Nav2 and the AI running, over ten minutes of checks.
+- **Whisper is back on the Pi.** On the Jetson, a voice clip arriving while the plant AI ran took
+  available memory under 700 MB and the guard killed the AI. The Pi is idle in sensors-only mode and
+  transcribes a clip in about 6 s. Jetson: `WHISPER_MODEL=none`. Pi, after `~/scout_up.sh`:
+  `docker exec -d scout-ai bash -c "source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash && export HF_HUB_OFFLINE=1 && ros2 run scout_perception whisper_node --ros-args -p model:=openai/whisper-base.en > /fetch_ws/logs/whisper.log 2>&1"`
+  Without Whisper the Jetson keeps about 1.3 GB available with Firefox open.
+- **Quest app checked without a headset** (Kevin's branch `quest-app`, not merged into this one).
+  `pi/scripts/quest_probe.py` connects to the Pi's ROS-TCP-Endpoint the way the app does, with the same
+  topics and types as `Unity/Assets/Scripts/Ros`. Through `172.20.10.10:10000` it received
+  `/mission/state` 1 Hz, `/map` (226x216), camera 15 Hz at 52 KB, and a WAV sent on `/voice/audio` came
+  back on `/voice/text` 6.3 s later and reached `mission_manager` on the Jetson. Two things for Kevin:
+  - **`/pose` sent nothing while the robot stood still.** slam_toolbox publishes it only after a scan
+    update, so the app has no robot position until the robot first moves.
+  - `/survey/*` were silent because no capture ran during the probe. Not tested: teleop and e-stop
+    (the probe never publishes them), and a real headset.
+- `scout_ai_up.sh` twice printed "/detections is NOT publishing" while `/detections` was at 9 Hz
+  seconds later. The check is wrong somewhere; not found yet.
+- Left running at 3:40 PM. Pi: sensors, endpoint, Foxglove, Whisper. Jetson: mapping, Nav2, mission,
+  panorama, `ai_node`, localizer. Start the Jetson side with
+  `AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia AI_ONE_PROCESS=1 WHISPER_MODEL=none pi/jetson/jetson_up.sh`.
 - Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
 
 ## 12. Rules for anyone (or any agent) continuing
