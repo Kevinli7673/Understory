@@ -150,10 +150,15 @@ def transcribe(wav_path):
                 import whisper
                 _whisper = ('openai', whisper.load_model('small.en'))
         kind, model = _whisper
+        # Decode the WAV ourselves (16 kHz mono int16) and pass samples: avoids ffmpeg / PyAV version issues.
+        import numpy as np
+        import wave
+        with wave.open(str(wav_path)) as w:
+            audio = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(np.float32) / 32768.0
         if kind == 'faster':
-            segments, _ = model.transcribe(str(wav_path))
+            segments, _ = model.transcribe(audio, language='en')
             return ' '.join(seg.text for seg in segments).strip()
-        return model.transcribe(str(wav_path))['text'].strip()
+        return model.transcribe(audio, language='en')['text'].strip()
     except ImportError:
         return None
     except Exception as e:  # model download failure etc.
