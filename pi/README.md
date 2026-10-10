@@ -19,6 +19,7 @@ cloned at `~/fetch_ws/src/Understory`.
 | `scripts/save_frames.py`, `scripts/record_bag.sh` | Capture test data to `~/fetch_ws/frames` and `~/fetch_ws/bags`. |
 | `scripts/fake_survey.py` | Publish contract-correct fake `/survey/*` data for the Quest app and dashboard. |
 | `scripts/fake_sensors.py` | Publish fake `/sensors` (what the ESP32 bridge will send) so `/survey/readings` can be tested. |
+| `scripts/esp32_bridge.py` | `/cmd_vel` -> ESP32 wheels (`firmware/esp32_drive`), ESP32 sensor JSON -> `/sensors`. Auto-picks the ESP32's serial port, never the LiDAR's. |
 | `scripts/ai_selftest.sh` | Feed plant photos through the whole AI chain on a separate ROS domain and print the pins. |
 | `docker/Dockerfile.ai` | The `scout-ros-ai` image: `scout-ros` plus CPU PyTorch, transformers and open_clip. `scout_ai_up.sh` builds it when missing. |
 | `docker/Dockerfile` | The `scout-ros` image. Its base image `fetch-ros` only exists on the Pi, so other machines load the exported image instead of building. |
