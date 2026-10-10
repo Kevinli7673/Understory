@@ -229,7 +229,11 @@ gunzip -c ~/scout-ros-image.tar.gz | docker load
 
 mkdir -p ~/fetch_ws/src && cd ~/fetch_ws/src
 git clone https://github.com/Kevinli7673/Understory.git
+cd Understory && git checkout perception-pins     # only until PR #2 is merged into main
 ```
+
+**The AI code and this file are on branch `perception-pins` (PR #2), not yet on `main`.** Check with
+`git log --oneline -1 origin/main`; once PR #2 is merged, stay on `main`.
 
 ### Step 2: start it
 
@@ -415,7 +419,8 @@ to document the changes for the Jetson handoff."*
   **no real plant has been in front of the live camera yet** (section 9, item 3).
 - Found the Pi overheating with the AI on (83 °C, throttled). Stopped the AI nodes. Sensors,
   mapping, Nav2, mission and panorama were left running.
-- Committed and pushed the work.
+- Committed and pushed the work to branch `perception-pins` and opened PR #2 into `main`. The PR is
+  **not merged**: Alvaro or Kevin has to merge it.
 
 ## 12. Rules for anyone (or any agent) continuing
 
