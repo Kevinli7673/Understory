@@ -66,7 +66,8 @@ Shader "Understory/SplatBillboard"
 
                 half3 rgb = input.color.rgb;
                 #if !defined(UNITY_COLORSPACE_GAMMA)
-                rgb = SRGBToLinear(rgb);
+                // sRGB -> linear (fast polynomial fit; avoids depending on Color.hlsl)
+                rgb = rgb * (rgb * (rgb * 0.305306011 + 0.682171111) + 0.012522878);
                 #endif
                 output.color = half4(rgb, 1);
                 output.corner = input.corner;
