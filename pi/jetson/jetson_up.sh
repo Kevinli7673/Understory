@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # jetson_up.sh - start the Jetson side of Scout (run on the JETSON host, not on the Pi).
 # The Jetson runs the SAME Docker image as the Pi (scout-ros, ROS 2 Jazzy, arm64) and takes over
-# mapping + Nav2 + mission + panorama + detector. The Pi keeps the sensors, Foxglove and the Quest endpoint.
+# mapping + Nav2 + mission + panorama, then starts the plant AI (scout_ai_up.sh, its own container).
+# The Pi keeps the sensors, Foxglove and the Quest endpoint.
 # Safe to re-run. First-time setup (loading the image, cloning the repo) is in pi/README.md.
 #
 #   ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 #   SCOUT_PEER=172.20.10.10 .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
-#   DETECTOR_BACKEND=nanoowl_trt .../jetson_up.sh   # once that backend is implemented
+#   NO_AI=1 .../jetson_up.sh                        # mapping + mission only, no plant AI
+#   AI_IMAGE=<cuda image> AI_RUNTIME=nvidia .../jetson_up.sh   # GPU build of the AI container (HANDOFF.md)
 
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
-BACKEND=${DETECTOR_BACKEND:-dummy}
 
 warn() { printf '\n\033[1;31m!!! WARNING: %s\033[0m\n\n' "$*"; }
 in_scout() { docker exec $PEER scout bash -c "$SRC && $1"; }
@@ -55,7 +56,7 @@ else
   exit 1
 fi
 
-# --- 5. mapping + mission + panorama, and the detector ---
+# --- 5. mapping + mission + panorama ---
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   echo "Nav already running here."
 elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
@@ -64,13 +65,6 @@ else
   echo "Starting slam + Nav2 + mission + panorama..."
   docker exec -d $PEER scout bash -c "$SRC && ros2 launch /fetch_ws/src/Understory/pi/scout_nav.launch.py > /fetch_ws/logs/nav.log 2>&1"
 fi
-if docker exec scout pgrep -f detector_node >/dev/null; then
-  echo "Detector already running."
-else
-  echo "Starting detector (backend: $BACKEND)..."
-  docker exec -d $PEER scout bash -c "$SRC && ros2 run scout_perception detector_node --ros-args -p backend:=$BACKEND > /fetch_ws/logs/detector.log 2>&1"
-fi
-
 # --- 6. health check ---
 echo "Waiting for nodes (~20 s)..."
 sleep 12
@@ -81,10 +75,14 @@ if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q T
 else
   warn "no TF map -> base_link. Usual cause: Pi and Jetson clocks differ. Compare 'date' on both."
 fi
-for topic in /camera/image/compressed /detections; do
+for topic in /camera/image/compressed; do
   rate=$(in_scout "timeout 8 ros2 topic hz $topic 2>/dev/null" | grep 'average rate' | tail -1 | awk '{print $3}')
   if [ -n "$rate" ]; then echo "  $topic: $rate Hz"; else warn "$topic is NOT publishing"; fi
 done
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs /fetch_ws/build /fetch_ws/install /fetch_ws/log 2>/dev/null
-echo "Done. Stop with: docker exec scout pkill -INT -f 'ros2 launch'; docker exec scout pkill -INT -f detector_node"
+# --- 7. plant AI: detector + species + localizer in the scout-ai container (NO_AI=1 skips it) ---
+if [ -z "$NO_AI" ]; then
+  "$(dirname "$(readlink -f "$0")")/../scout_ai_up.sh"
+fi
+echo "Done. Stop with: docker exec scout pkill -INT -f 'ros2 launch'; $(dirname "$(readlink -f "$0")")/../scout_ai_up.sh --stop"
 echo "Test:  docker exec scout bash -c \"$SRC && ros2 topic pub --once /voice/text std_msgs/msg/String 'data: capture'\""

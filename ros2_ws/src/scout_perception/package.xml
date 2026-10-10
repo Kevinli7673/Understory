@@ -2,7 +2,7 @@
 <package format="3">
   <name>scout_perception</name>
   <version>0.0.1</version>
-  <description>Scout perception nodes: plant detector and bubble panorama builder.</description>
+  <description>Scout perception nodes: plant detector, species ID, pin localizer, bubble panorama.</description>
   <maintainer email="alvcm1501@gmail.com">Alvaro</maintainer>
   <license>MIT</license>
   <exec_depend>rclpy</exec_depend>
@@ -11,6 +11,7 @@
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>python3-opencv</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
+  <test_depend>python3-pytest</test_depend>
   <export>
     <build_type>ament_python</build_type>
   </export>

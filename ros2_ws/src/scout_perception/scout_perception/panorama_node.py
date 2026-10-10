@@ -7,11 +7,15 @@ Protocol on /survey/capture (std_msgs/String):
     "m1-b03/done"   finish the bubble now (otherwise it finishes after `frames_per_bubble` grabs)
 A capture for a different bubble_id also finishes the previous bubble.
 
-When a bubble finishes, the node tries to stitch it and publishes:
-    /survey/bubble_images   one image with frame_id "<bubble_id>/pano" if stitching worked,
-                            otherwise every frame with frame_id "<bubble_id>/<index>"
+When a bubble finishes, the node publishes:
+    /survey/bubble_images   every frame with frame_id "<bubble_id>/<index>" (always: the Quest places
+                            frames and pins by the per-frame yaw), then, only if stitching worked,
+                            one extra image with frame_id "<bubble_id>/pano"
     /survey/bubbles         the bubble JSON (stitched true/false, per-frame yaw, x, y, hfov)
     /survey/capture_done    the bubble_id, once per bubble
+The frames, the bubble JSON and capture_done go out before stitching starts (it takes ~10 s on the
+Pi), so the mission never waits on the stitcher. If stitching works, the pano follows and the bubble
+JSON is sent a second time with "stitched": true. Set the `stitch` parameter to false to skip it.
 """
 import json
 import math
@@ -36,6 +40,7 @@ class PanoramaNode(Node):
         # Horizontal field of view in radians, sent to the Quest to size each frame.
         # 0.83 (48 deg) is computed from the Brio 101's 58 deg diagonal spec at 4:3, not measured.
         self.hfov = self.declare_parameter('hfov', 0.83).value
+        self.stitch = self.declare_parameter('stitch', True).value
 
         self.latest = None        # most recent camera message
         self.bubble_id = None     # bubble being captured
@@ -97,35 +102,37 @@ class PanoramaNode(Node):
 
     def build(self, bubble_id, frames, pose):
         start = time.time()
-        pano = None
-        if len(frames) >= 2:
-            images = [cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR) for jpeg, _ in frames]
-            try:
-                status, result = cv2.Stitcher_create(cv2.Stitcher_PANORAMA).stitch(images)
-                if status == cv2.Stitcher_OK:
-                    pano = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
-                else:
-                    self.get_logger().warn(f'{bubble_id}: stitching failed (status {status}), sending frames')
-            except cv2.error as e:
-                self.get_logger().warn(f'{bubble_id}: stitcher error ({e}), sending frames')
-
-        if pano is not None:
-            self.publish_image(f'{bubble_id}/pano', pano)
-        else:
-            for i, (jpeg, _) in enumerate(frames):
-                self.publish_image(f'{bubble_id}/{i}', jpeg)
-                time.sleep(0.05)               # don't flood slow subscribers (Quest over Wi-Fi)
-
-        self.pub_bubbles.publish(String(data=json.dumps({
+        for i, (jpeg, _) in enumerate(frames):
+            self.publish_image(f'{bubble_id}/{i}', jpeg)
+            time.sleep(0.15)                   # a burst overflows slow subscribers (Quest over Wi-Fi)
+        bubble = {
             'bubble_id': bubble_id,
             'mission_id': bubble_id.rsplit('-', 1)[0],       # "m1-b03" -> "m1"
             't': round(start, 2), 'x': round(pose[0], 2), 'y': round(pose[1], 2),
-            'stitched': pano is not None,
+            'stitched': False,
             'frames': [{'index': i, 'yaw': round(yaw, 2)} for i, (_, yaw) in enumerate(frames)],
-            'hfov': self.hfov})))
+            'hfov': self.hfov}
+        self.pub_bubbles.publish(String(data=json.dumps(bubble)))
         self.pub_done.publish(String(data=bubble_id))
-        self.get_logger().info(f'{bubble_id}: published ({len(frames)} frames, stitched={pano is not None}, '
-                               f'{time.time() - start:.1f} s)')
+        self.get_logger().info(f'{bubble_id}: published {len(frames)} frames ({time.time() - start:.1f} s)')
+
+        # optional extra: a stitched pano. It has no known start yaw, so the frames stay the main product.
+        if not self.stitch or len(frames) < 2:
+            return
+        images = [cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR) for jpeg, _ in frames]
+        try:
+            status, result = cv2.Stitcher_create(cv2.Stitcher_PANORAMA).stitch(images)
+        except cv2.error as e:
+            self.get_logger().warn(f'{bubble_id}: stitcher error ({e}), frames only')
+            return
+        if status != cv2.Stitcher_OK:
+            self.get_logger().warn(f'{bubble_id}: stitching failed (status {status}), frames only')
+            return
+        pano = cv2.imencode('.jpg', result, [cv2.IMWRITE_JPEG_QUALITY, 85])[1].tobytes()
+        self.publish_image(f'{bubble_id}/pano', pano)
+        bubble['stitched'] = True
+        self.pub_bubbles.publish(String(data=json.dumps(bubble)))
+        self.get_logger().info(f'{bubble_id}: pano published ({time.time() - start:.1f} s)')
 
     def publish_image(self, frame_id, jpeg):
         msg = CompressedImage(format='jpeg', data=jpeg)
