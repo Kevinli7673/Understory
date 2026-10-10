@@ -41,7 +41,7 @@ def test_unknown_space_is_not_safe():
     g = -np.ones((40, 40), dtype=np.int8)
     g[10:30, 10:30] = 0
     pts = plan_survey_points(g.ravel().tolist(), 40, 40, 0.1, -2.0, -2.0, (0.0, 0.0),
-                             spacing=0.5, clearance=0.2, max_points=50)
+                             spacing=0.5, clearance=0.2, max_points=50, gap_fill=0.0)
     assert pts
     assert all(-1.0 + 0.2 <= x <= 1.0 - 0.2 and -1.0 + 0.2 <= y <= 1.0 - 0.2 for x, y in pts)
 
@@ -53,3 +53,25 @@ def test_max_points_and_origin_offset():
                              spacing=1.0, clearance=0.3, max_points=3)
     assert len(pts) == 3
     assert all(-2.5 < x < 2.5 and -2.0 < y < 2.0 for x, y in pts)
+
+
+def test_gaps_between_lidar_rays_count_as_free():
+    # Free space seen through sparse rays: free cells only on every 3rd column.
+    g = -np.ones((60, 60), dtype=np.int8)
+    g[5:55, 5:55:3] = 0
+    pts = plan_survey_points(g.ravel().tolist(), 60, 60, 0.05, 0.0, 0.0, (1.5, 1.5),
+                             spacing=0.5, clearance=0.2, max_points=50)
+    assert len(pts) > 4
+    none = plan_survey_points(g.ravel().tolist(), 60, 60, 0.05, 0.0, 0.0, (1.5, 1.5),
+                              spacing=0.5, clearance=0.2, max_points=50, gap_fill=0.0)
+    assert none == []
+
+
+def test_visited_points_are_skipped():
+    g, res = _room()
+    h, w = g.shape
+    args = (g.ravel().tolist(), w, h, res, 0.0, 0.0, (0.5, 0.5))
+    first = plan_survey_points(*args, spacing=1.0, clearance=0.3, max_points=1)
+    second = plan_survey_points(*args, spacing=1.0, clearance=0.3, max_points=1, visited=first)
+    assert first and second and first != second
+    assert np.hypot(second[0][0] - first[0][0], second[0][1] - first[0][1]) >= 0.5

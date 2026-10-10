@@ -54,19 +54,19 @@ def generate_launch_description():
                 output='screen', parameters=[cfg('slam_toolbox.yaml')])
 
     to_auto = [('cmd_vel', '/cmd_vel_auto')]
+    # respawn: a crashed Nav2 server comes back and the lifecycle manager reconnects to it.
+    nav_kw = dict(output='screen', parameters=[nav2_params], respawn=True, respawn_delay=2.0)
     nav2 = [
         Node(package='nav2_controller', executable='controller_server', name='controller_server',
-             output='screen',
-             parameters=[nav2_params], remappings=to_auto),
-        Node(package='nav2_planner', executable='planner_server', name='planner_server',
-             output='screen', parameters=[nav2_params]),
+             remappings=to_auto, **nav_kw),
+        Node(package='nav2_planner', executable='planner_server', name='planner_server', **nav_kw),
         Node(package='nav2_behaviors', executable='behavior_server', name='behavior_server',
-             output='screen', parameters=[nav2_params], remappings=to_auto),
-        Node(package='nav2_bt_navigator', executable='bt_navigator', name='bt_navigator',
-             output='screen', parameters=[nav2_params]),
+             remappings=to_auto, **nav_kw),
+        Node(package='nav2_bt_navigator', executable='bt_navigator', name='bt_navigator', **nav_kw),
         Node(package='nav2_lifecycle_manager', executable='lifecycle_manager',
              name='lifecycle_manager_navigation', output='screen',
-             parameters=[{'autostart': True, 'node_names': lifecycle_nodes}]),
+             # bond_timeout 10 s (default 4): a busy Jetson CPU shouldn't take Nav2 down.
+             parameters=[{'autostart': True, 'node_names': lifecycle_nodes, 'bond_timeout': 10.0}]),
     ]
 
     mux = Node(package='twist_mux', executable='twist_mux', name='twist_mux', output='screen',
