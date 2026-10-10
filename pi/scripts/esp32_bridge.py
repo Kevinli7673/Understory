@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""ESP32 serial bridge: /cmd_vel -> wheels, ESP32 sensor JSON -> /sensors.
+
+Run inside the container (~/scout_shell.sh on the host first), ESP32 plugged into the Pi by USB:
+    python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py
+    python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --port /dev/ttyUSB1
+
+Firmware and line protocol: firmware/esp32_drive/esp32_drive.ino
+    to ESP32:   "C <vx> <vy> <wz>\\n"  (ROS axes, m/s and rad/s), sent for every /cmd_vel message
+    from ESP32: "{...}" sensor JSON -> /sensors (std_msgs/String), "# ..." status -> log
+
+/cmd_vel comes from twist_mux (e-stop > Quest teleop > autonomy). When nothing publishes, the bridge
+sends nothing and the ESP32's 300 ms watchdog stops the motors, so a dead bridge, Pi or cable also stops
+the robot. Stop fake_sensors.py once the real sensor pod publishes here.
+
+Port: --port, else the first /dev/serial/by-id device that is NOT the LiDAR (its CP2102N id is in
+scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM*/ttyUSB* likewise.
+"""
+import argparse
+import glob
+import json
+import os
+import time
+
+import rclpy
+from geometry_msgs.msg import Twist
+from rclpy.node import Node
+from std_msgs.msg import String
+
+import serial
+
+LIDAR_ID = '5839a1d8ce6ff01187f694301045c30f'  # from pi/scout_bringup.launch.py
+
+
+def find_port():
+    lidar_paths = {os.path.realpath(p) for p in glob.glob('/dev/serial/by-id/*') if LIDAR_ID in p}
+    for p in sorted(glob.glob('/dev/serial/by-id/*')):
+        if LIDAR_ID not in p:
+            return p
+    for p in sorted(glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')):
+        if os.path.realpath(p) not in lidar_paths:
+            return p
+    return None
+
+
+class Esp32Bridge(Node):
+    def __init__(self, port, baud):
+        super().__init__('esp32_bridge')
+        self.port_arg, self.baud = port, baud
+        self.ser = None
+        self.buf = b''
+        self.last_status = ''
+        self.sent = 0
+        self.pub = self.create_publisher(String, '/sensors', 10)
+        self.create_subscription(Twist, '/cmd_vel', self.on_cmd, 10)
+        self.create_timer(0.02, self.poll)          # read ESP32 output at 50 Hz
+        self.create_timer(2.0, self.ensure_open)    # (re)connect if unplugged
+        self.ensure_open()
+
+    def ensure_open(self):
+        if self.ser is not None:
+            return
+        port = self.port_arg or find_port()
+        if not port:
+            self.get_logger().warn('no ESP32 serial port found (is it plugged in? try --port)', throttle_duration_sec=10.0)
+            return
+        try:
+            self.ser = serial.Serial(port, self.baud, timeout=0, write_timeout=0.05)
+            self.get_logger().info(f'ESP32 on {port} @ {self.baud}')
+        except (serial.SerialException, OSError) as e:
+            self.get_logger().warn(f'cannot open {port}: {e}', throttle_duration_sec=10.0)
+            self.ser = None
+
+    def drop(self, why):
+        self.get_logger().error(f'ESP32 serial lost ({why}); reconnecting')
+        try:
+            self.ser.close()
+        except Exception:
+            pass
+        self.ser = None
+        self.buf = b''
+
+    def on_cmd(self, msg):
+        if self.ser is None:
+            return
+        line = f'C {msg.linear.x:.3f} {msg.linear.y:.3f} {msg.angular.z:.3f}\n'
+        try:
+            self.ser.write(line.encode('ascii'))
+            self.sent += 1
+        except (serial.SerialException, OSError) as e:
+            self.drop(e)
+
+    def poll(self):
+        if self.ser is None:
+            return
+        try:
+            self.buf += self.ser.read(4096)
+        except (serial.SerialException, OSError) as e:
+            self.drop(e)
+            return
+        while b'\n' in self.buf:
+            raw, self.buf = self.buf.split(b'\n', 1)
+            text = raw.decode('utf-8', 'replace').strip()
+            if not text:
+                continue
+            if text.startswith('{'):
+                try:
+                    json.loads(text)
+                except ValueError:
+                    self.get_logger().warn(f'bad sensor JSON: {text}')
+                    continue
+                self.pub.publish(String(data=text))
+            elif text.startswith('#'):
+                # Status every 2 s: log only changes (plus errors / watchdog) so the log stays readable.
+                status = text.split(' cmds=')[0]
+                if 'ERROR' in text or 'watchdog' in text or 'bad' in text:
+                    self.get_logger().warn(text)
+                elif status != self.last_status:
+                    self.get_logger().info(text)
+                self.last_status = status
+            else:
+                self.get_logger().debug(f'esp32: {text}')
+        if len(self.buf) > 8192:
+            self.buf = b''
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('--port', default='', help='serial device (default: auto, never the LiDAR)')
+    ap.add_argument('--baud', type=int, default=115200)
+    args = ap.parse_args()
+    rclpy.init()
+    node = Esp32Bridge(args.port, args.baud)
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if node.ser is not None:
+            try:
+                node.ser.write(b'S\n')  # stop on the way out
+            except Exception:
+                pass
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
+if __name__ == '__main__':
+    main()

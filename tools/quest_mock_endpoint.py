@@ -136,6 +136,19 @@ def parse_uint8_multiarray(payload):
 
 
 _whisper = None
+# Hint for Whisper: the words we expect. Same idea for the Jetson Whisper node.
+COMMAND_PROMPT = 'Robot commands: start survey, stop, return home, come back, manual, capture, resume.'
+
+
+def command_from_text(text):
+    """Whisper text -> mission keyword, forgiving of short-clip mishearings ("Sorry, survey." -> start)."""
+    t = text.lower()
+    # Most specific first; "survey" alone means start, so it's checked last ("stop the survey" -> stop).
+    for word, keys in (('stop', ('stop',)), ('return', ('return', 'come back', 'go home')), ('manual', ('manual',)),
+                       ('capture', ('capture',)), ('resume', ('resume', 'continue')), ('start', ('start', 'survey'))):
+        if any(k in t for k in keys):
+            return word
+    return None
 
 
 def transcribe(wav_path):
@@ -156,9 +169,9 @@ def transcribe(wav_path):
         with wave.open(str(wav_path)) as w:
             audio = np.frombuffer(w.readframes(w.getnframes()), dtype='<i2').astype(np.float32) / 32768.0
         if kind == 'faster':
-            segments, _ = model.transcribe(audio, language='en')
+            segments, _ = model.transcribe(audio, language='en', initial_prompt=COMMAND_PROMPT)
             return ' '.join(seg.text for seg in segments).strip()
-        return model.transcribe(audio, language='en')['text'].strip()
+        return model.transcribe(audio, language='en', initial_prompt=COMMAND_PROMPT)['text'].strip()
     except ImportError:
         return None
     except Exception as e:  # model download failure etc.
@@ -268,6 +281,12 @@ class MockRobot:
         self.events = self.build_timeline()
         self.cursor = 0
         self.mission_clock = 0.0
+        self.replaying = False          # the recorded survey runs only after start/resume
+        self.sent_pins = set()          # pin_ids already published (manual captures + replay)
+        self.captures = 0
+        self.capture_pending = False
+        self.capture_until = 0.0
+        self.state_after_capture = 'IDLE'
         more = len(self.missions) - self.mission_index - 1
         print(f'[mock] mission {mission}: {len(self.bubbles)} bubbles, {len(self.pins)} pins, '
               f'{len(self.readings)} readings' + (f'; {more} more queued (press Start after this one)' if more else ''))
@@ -295,14 +314,30 @@ class MockRobot:
             if word in ('start', 'resume') and not self.estop:
                 if word == 'start' and self.finished and self.mission_index + 1 < len(self.missions):
                     self.load_next_mission()
+                self.replaying = True
                 self.state = 'SURVEYING'
             elif word == 'stop':
+                self.replaying = False
                 self.state = 'IDLE'
             elif word in ('return', 'come back', 'go home'):
+                self.replaying = False
                 self.state = 'RETURNING'
+                self.return_t = time.time()
             elif word == 'manual':
-                self.state = 'MANUAL'
-            elif word == 'capture':
+                self.state = 'MANUAL'      # survey paused; "resume" continues it
+            elif word == 'capture' and (self.capture_pending or self.capture_until):
+                print('[mock]   already capturing, ignored')
+                return
+            elif word == 'capture' and not self.estop:
+                # Like the real mission manager: spin and photograph HERE, then carry on as before.
+                if not self.capture_pending and not self.capture_until:
+                    if self.state in ('SURVEYING', 'NEXT_POINT'):
+                        self.state_after_capture = 'SURVEYING'
+                    elif self.state == 'MANUAL':
+                        self.state_after_capture = 'MANUAL'
+                    else:
+                        self.state_after_capture = 'IDLE'
+                self.capture_pending = True
                 self.state = 'CAPTURING'
         print(f'[mock] /voice/text "{text}" -> {self.state}')
 
@@ -312,6 +347,8 @@ class MockRobot:
             self.estop = on
             if on:
                 self.state = 'STOPPED'
+                self.capture_pending = False
+                self.capture_until = 0.0
         if changed:
             print(f'[mock] /estop {on} -> {self.state}')
 
@@ -319,46 +356,98 @@ class MockRobot:
         with self.lock:
             self.teleop = (vx, vy, wz)
             self.teleop_t = time.time()
-            if self.state in ('SURVEYING', 'CAPTURING', 'NEXT_POINT', 'RETURNING') and any(abs(v) > 1e-3 for v in self.teleop):
+            moving = any(abs(v) > 1e-3 for v in self.teleop)
+            if moving and self.state in ('SURVEYING', 'CAPTURING', 'NEXT_POINT', 'RETURNING'):
                 self.state = 'MANUAL'
+                self.capture_pending = False
+                self.capture_until = 0.0
                 print('[mock] teleop during autonomy -> MANUAL')
+
+    def _drive_toward(self, tx, ty, dt):
+        """Move toward (tx, ty) at a robot-like speed; True once there."""
+        dx, dy = tx - self.x, ty - self.y
+        d = math.hypot(dx, dy)
+        if d < 0.15:
+            return True
+        step = min(d, 0.25 * self.speed * dt)
+        self.x += dx / d * step
+        self.y += dy / d * step
+        self.yaw = math.atan2(dy, dx)
+        return False
 
     # --- sim step; returns messages to publish
     def step(self, dt):
         out = []
         with self.lock:
-            teleop_live = time.time() - self.teleop_t < 0.5 and not self.estop
+            now = time.time()
+            teleop_live = now - self.teleop_t < 0.5 and not self.estop
             if teleop_live:
                 vx, vy, wz = self.teleop
                 c, s = math.cos(self.yaw), math.sin(self.yaw)
                 self.x += (vx * c - vy * s) * dt
                 self.y += (vx * s + vy * c) * dt
                 self.yaw = math.atan2(math.sin(self.yaw + wz * dt), math.cos(self.yaw + wz * dt))
-            if self.state in ('SURVEYING', 'CAPTURING', 'NEXT_POINT'):
+
+            if self.capture_pending:                       # manual "Capture here"
+                self.capture_pending = False
+                self.capture_until = now + 2.0
+                out.extend(self.capture_here())
+            elif self.capture_until and now >= self.capture_until:
+                self.capture_until = 0.0
+                if self.state == 'CAPTURING':
+                    self.state = self.state_after_capture
+
+            surveying = self.replaying and self.state in ('SURVEYING', 'CAPTURING', 'NEXT_POINT') and not self.capture_until
+            if surveying:
                 self.mission_clock += dt * self.speed
                 while self.cursor < len(self.events) and self.events[self.cursor][0] <= self.mission_clock:
-                    _, kind, data = self.events[self.cursor]
+                    t_ev, kind, data = self.events[self.cursor]
+                    # Off the route (driven away / resumed elsewhere)? Drive back instead of teleporting.
+                    if kind == 'reading' and not teleop_live and not self._drive_toward(data['x'], data['y'], dt):
+                        self.mission_clock = t_ev
+                        break
                     self.cursor += 1
                     out.extend(self.emit(kind, data))
-                if self.cursor >= len(self.events):
+                if self.finished:
+                    self.replaying = False
                     self.state = 'RETURNING'
-                    self.return_t = time.time()
+                    self.return_t = now
             elif self.state == 'RETURNING':
-                d = math.hypot(self.x, self.y)
-                if d < 0.05 or time.time() - getattr(self, 'return_t', 0) > 8:
+                if self._drive_toward(0.0, 0.0, dt) or now - getattr(self, 'return_t', now) > 30:
                     self.state = 'IDLE'
-                else:
-                    k = min(1.0, 0.25 * dt / d)
-                    self.x -= self.x * k
-                    self.y -= self.y * k
+        return out
+
+    def capture_here(self):
+        """One bubble at the robot's current spot + plants within 2 m (frames borrowed from the nearest recorded bubble)."""
+        mission = self.missions[self.mission_index]
+        near = min(self.bubbles, key=lambda b: math.hypot(b['x'] - self.x, b['y'] - self.y))
+        self.captures += 1
+        bid = f'{mission}-b{90 + self.captures:02d}'
+        out = []
+        for f in near['frames']:
+            jpg = self.folder / 'frames' / f"{near['bubble_id']}_{f['index']}.jpg"
+            if jpg.exists():
+                out.append(frame('/survey/bubble_images', msg_compressed_image(f"{bid}/{f['index']}", jpg.read_bytes())))
+        bubble = dict(near, bubble_id=bid, t=time.time(), x=round(self.x, 2), y=round(self.y, 2), stitched=False)
+        out.append(frame('/survey/bubbles', msg_string(json.dumps(bubble))))
+        found = 0
+        for p in self.pins:
+            if p['pin_id'] in self.sent_pins or math.hypot(p['x'] - self.x, p['y'] - self.y) > 2.0:
+                continue
+            pin = dict(p, bubble_id=bid, yaw=round(math.atan2(p['y'] - self.y, p['x'] - self.x), 3))
+            self.sent_pins.add(p['pin_id'])
+            out.append(frame('/survey/pins', msg_string(json.dumps(pin))))
+            found += 1
+        print(f'[mock] capture {bid} at ({self.x:.2f}, {self.y:.2f}): {found} plant(s) within 2 m')
         return out
 
     def emit(self, kind, data):
         if kind == 'state':
-            self.state = data
+            if not self.capture_until:
+                self.state = data
             return []
         if kind == 'reading':
-            if time.time() - self.teleop_t > 0.5:  # follow the recorded path unless someone is driving
+            if time.time() - self.teleop_t > 0.5:  # on the route (step() drove us here)
                 dx, dy = data['x'] - self.x, data['y'] - self.y
                 if math.hypot(dx, dy) > 0.02:
                     self.yaw = math.atan2(dy, dx)
@@ -378,6 +467,9 @@ class MockRobot:
             print(f"[mock] bubble {data['bubble_id']}")
             return out
         if kind == 'pin':
+            if data['pin_id'] in self.sent_pins:   # already found by a manual capture
+                return []
+            self.sent_pins.add(data['pin_id'])
             print(f"[mock] pin {data['pin_id']} {data['label']}")
             return [frame('/survey/pins', msg_string(json.dumps(data)))]
         return []
@@ -431,10 +523,11 @@ def serve_client(conn, addr, robot, args):
                               'the real pipeline: Whisper on the Jetson -> /voice/text)')
                     else:
                         print(f'[mock]   whisper: "{text}"')
-                        for word in ('start', 'stop', 'return', 'come back', 'go home', 'manual', 'capture', 'resume'):
-                            if word in text.lower():
-                                robot.on_voice(word)
-                                break
+                        word = command_from_text(text)
+                        if word:
+                            robot.on_voice(word)
+                        else:
+                            print('[mock]   (no command recognized)')
                 else:
                     print(f'[mock] (ignored) {topic} {len(payload)} bytes')
         except (ConnectionError, OSError):
