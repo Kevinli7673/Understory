@@ -38,6 +38,9 @@ class OwlVitTorchBackend:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.processor = OwlViTProcessor.from_pretrained(model_name)
         self.model = OwlViTForObjectDetection.from_pretrained(model_name).to(self.device).eval()
+        # half precision on the GPU: about half the memory (the Jetson shares 8 GB with everything else)
+        self.dtype = torch.float16 if self.device == 'cuda' else torch.float32
+        self.model = self.model.to(self.dtype)
         self.text = self.processor(text=[self.prompts], return_tensors='pt').to(self.device)
 
     def detect(self, bgr):
@@ -45,10 +48,10 @@ class OwlVitTorchBackend:
         h, w = bgr.shape[:2]
         pixels = self.processor(images=bgr[:, :, ::-1].copy(), return_tensors='pt').to(self.device)
         with self.torch.no_grad():
-            out = self.model(pixel_values=pixels['pixel_values'], **self.text)
-        scores, labels = out.logits[0].sigmoid().max(dim=-1)
+            out = self.model(pixel_values=pixels['pixel_values'].to(self.dtype), **self.text)
+        scores, labels = out.logits[0].float().sigmoid().max(dim=-1)
         keep = scores > self.threshold
-        scores, labels, boxes = scores[keep], labels[keep], out.pred_boxes[0][keep]
+        scores, labels, boxes = scores[keep], labels[keep], out.pred_boxes[0].float()[keep]
         # pred_boxes are (cx, cy, w, h) as fractions of the image width and height
         cx, cy, bw, bh = (boxes * boxes.new_tensor([w, h, w, h])).unbind(-1)
         xyxy = self.torch.stack([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2], dim=-1)

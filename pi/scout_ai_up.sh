@@ -15,6 +15,10 @@
 #   DETECTOR_BACKEND=owlvit_torch | dummy        SPECIES_BACKEND=bioclip | dummy
 #   DETECTOR_THRESHOLD=0.05      lower finds more plants and more junk
 #   WHISPER_MODEL=openai/whisper-base.en   or openai/whisper-small.en (slower, more accurate), or none to skip it
+#   WHISPER_DEVICE=cpu           cpu keeps Whisper off the GPU. Each GPU process loads about 1 GB of CUDA libraries,
+#                                and three of them froze the 8 GB Jetson. Set to gpu only with memory to spare.
+#   AI_ONE_PROCESS=1             detector and species in one process (ai_node, log in ai.log). Use it on the Jetson GPU:
+#                                it needs about 1.6 GB instead of 3.5 GB, and the two models never peak together.
 #   SCOUT_PEER=<other machine's IP>   same meaning as in scout_up.sh
 
 AI_IMAGE=${AI_IMAGE:-scout-ros-ai}
@@ -22,7 +26,9 @@ DET=${DETECTOR_BACKEND:-owlvit_torch}
 SPEC=${SPECIES_BACKEND:-bioclip}
 THRESH=${DETECTOR_THRESHOLD:-0.05}
 THREADS=${AI_THREADS:-2}
+[ -n "$AI_ONE_PROCESS" ] && DLOG=ai SLOG=ai || DLOG=detector SLOG=species
 WHISPER=${WHISPER_MODEL:-openai/whisper-base.en}
+[ "${WHISPER_DEVICE:-cpu}" = cpu ] && WHISPER_ENV='export CUDA_VISIBLE_DEVICES= &&' || WHISPER_ENV=
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
 HERE=$(dirname "$(readlink -f "$0")")
@@ -32,11 +38,11 @@ warn() { printf '\n\033[1;31m!!! WARNING: %s\033[0m\n\n' "$*"; }
 in_ai() { docker exec $PEER scout-ai bash -c "$SRC && $1"; }
 
 if [ "$1" = "--stop" ]; then
-  for pat in detector_node species_node localizer_node whisper_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
+  for pat in ai_node detector_node species_node localizer_node whisper_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
   echo "AI nodes stopped."; exit 0
 fi
 
-# --- 1. image + container ---
+# --- 1. image + container (--init reaps stopped nodes; as zombies, pgrep would report them still running) ---
 if ! docker image inspect "$AI_IMAGE" >/dev/null 2>&1; then
   if [ "$AI_IMAGE" = scout-ros-ai ] && docker image inspect scout-ros >/dev/null 2>&1; then
     echo "Building $AI_IMAGE (one time, needs internet, about 5 minutes)..."
@@ -51,7 +57,7 @@ if [ "$(docker inspect -f '{{.State.Running}}' scout-ai 2>/dev/null)" = "true" ]
 else
   docker rm scout-ai >/dev/null 2>&1
   echo "Creating container 'scout-ai' from $AI_IMAGE..."
-  docker run -d --name scout-ai --restart unless-stopped --net=host --ipc=host ${AI_RUNTIME:+--runtime $AI_RUNTIME} \
+  docker run -d --init --name scout-ai --restart unless-stopped --net=host --ipc=host ${AI_RUNTIME:+--runtime $AI_RUNTIME} \
     -e OMP_NUM_THREADS="$THREADS" -v "$HOME/fetch_ws:/fetch_ws" -v "$HF:/root/.cache/huggingface" \
     "$AI_IMAGE" sleep infinity >/dev/null || exit 1
 fi
@@ -72,15 +78,19 @@ start() {   # start <process pattern> <log name> <command>
   echo "Starting $2..."
   docker exec -d $PEER scout-ai bash -c "$SRC && $OFFLINE $3 > /fetch_ws/logs/$2.log 2>&1"
 }
-start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH"
-start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC"
+if [ -n "$AI_ONE_PROCESS" ]; then
+  start ai_node ai "ros2 run scout_perception ai_node --ros-args -p detector_node:backend:=$DET -p detector_node:score_threshold:=$THRESH -p species_node:backend:=$SPEC"
+else
+  start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH"
+  start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC"
+fi
 start localizer_node localizer "ros2 run scout_perception localizer_node"
 if [ "$WHISPER" != none ]; then
   # Whisper has its own offline switch, so a missing voice model never forces the plant models online
   PLANT_OFFLINE=$OFFLINE; OFFLINE=
   if ls "$HF/hub/models--${WHISPER//\//--}"/snapshots/*/model.safetensors >/dev/null 2>&1; then OFFLINE='export HF_HUB_OFFLINE=1 &&'
   else echo "Voice model $WHISPER is not on disk; downloading it (needs internet once)..."; fi
-  start whisper_node whisper "ros2 run scout_perception whisper_node --ros-args -p model:=$WHISPER"
+  start whisper_node whisper "$WHISPER_ENV ros2 run scout_perception whisper_node --ros-args -p model:=$WHISPER"
   OFFLINE=$PLANT_OFFLINE
 fi
 [ "$1" = "--fake-sensors" ] && start fake_sensors.py fake_sensors "python3 /fetch_ws/src/Understory/pi/scripts/fake_sensors.py"
@@ -88,17 +98,18 @@ fi
 # --- 4. health check ---
 echo "Waiting for the models to load (up to 3 minutes the first time)..."
 for i in $(seq 36); do
-  grep -q 'detector running' "$HOME/fetch_ws/logs/detector.log" 2>/dev/null &&
-    grep -q 'species node running' "$HOME/fetch_ws/logs/species.log" 2>/dev/null && break
-  for n in detector species; do
-    docker exec scout-ai pgrep -f "${n}_node" >/dev/null || { warn "$n node died. See ~/fetch_ws/logs/$n.log"; tail -5 "$HOME/fetch_ws/logs/$n.log"; }
+  grep -q 'detector running' "$HOME/fetch_ws/logs/$DLOG.log" 2>/dev/null &&
+    grep -q 'species node running' "$HOME/fetch_ws/logs/$SLOG.log" 2>/dev/null && break
+  # with AI_ONE_PROCESS both names match the one ai_node process, through its parameter names
+  for n in detector:$DLOG species:$SLOG; do
+    docker exec scout-ai pgrep -f "${n%:*}_node" >/dev/null || { warn "${n%:*} node died. See ~/fetch_ws/logs/${n#*:}.log"; tail -5 "$HOME/fetch_ws/logs/${n#*:}.log"; }
   done
   sleep 5
 done
 # one message is enough: on a CPU the detector manages a frame every few seconds, too slow for `ros2 topic hz`
 if in_ai "timeout 60 ros2 topic echo /detections std_msgs/msg/String --once" >/dev/null 2>&1; then
   echo "  /detections: publishing"
-else warn "/detections is NOT publishing (see ~/fetch_ws/logs/detector.log; is the camera up?)"; fi
+else warn "/detections is NOT publishing (see ~/fetch_ws/logs/$DLOG.log; is the camera up?)"; fi
 docker exec scout-ai pgrep -f species_node >/dev/null && echo "  species node: running" || warn "species node is NOT running"
 docker exec scout-ai pgrep -f localizer_node >/dev/null && echo "  localizer: running" || warn "localizer is NOT running"
 if [ "$WHISPER" != none ]; then

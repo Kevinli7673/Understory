@@ -29,18 +29,21 @@ class BioClipSpecies:
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(model_name)
         self.model = self.model.to(self.device).eval()
+        # half precision on the GPU: about half the memory. The scoring below stays in float32.
+        self.dtype = torch.float16 if self.device == 'cuda' else torch.float32
+        self.model = self.model.to(self.dtype)
         tokens = open_clip.get_tokenizer(model_name)(
             [prompt(label, sci) for label, _, sci in SPECIES] + NOT_PLANTS)
         with torch.no_grad():
-            text = self.model.encode_text(tokens.to(self.device))
+            text = self.model.encode_text(tokens.to(self.device)).float()
             self.text = text / text.norm(dim=-1, keepdim=True)
-            self.scale = self.model.logit_scale.exp()
+            self.scale = self.model.logit_scale.exp().float()
 
     def classify(self, bgr):
         from PIL import Image
-        image = self.preprocess(Image.fromarray(bgr[:, :, ::-1].copy())).unsqueeze(0).to(self.device)
+        image = self.preprocess(Image.fromarray(bgr[:, :, ::-1].copy())).unsqueeze(0).to(self.device, self.dtype)
         with self.torch.no_grad():
-            emb = self.model.encode_image(image)
+            emb = self.model.encode_image(image).float()
             emb = emb / emb.norm(dim=-1, keepdim=True)
             probs = (self.scale * emb @ self.text.T).softmax(dim=-1)[0]
         best = int(probs.argmax())

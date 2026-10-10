@@ -24,6 +24,7 @@ setup(
             'species_node = scout_perception.species_node:main',
             'localizer_node = scout_perception.localizer_node:main',
             'whisper_node = scout_perception.whisper_node:main',
+            'ai_node = scout_perception.ai_node:main',
         ],
     },
 )

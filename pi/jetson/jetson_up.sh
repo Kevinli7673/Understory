@@ -36,6 +36,11 @@ else
     -v /dev:/dev -v "$HOME/fetch_ws:/fetch_ws" scout-ros sleep infinity >/dev/null || exit 1
 fi
 docker exec scout mkdir -p /fetch_ws/logs
+# 70 KB camera frames cross the hotspot as ~50 IP fragments each. With the kernel defaults, lost fragments
+# sit in the reassembly queue for 30 s, fill it, and then no frame gets through at all (seen on the Jetson).
+# Not namespaced, so setting it from the privileged host-network container sets it for the host. Lost on reboot.
+docker exec scout sysctl -q -w net.ipv4.ipfrag_time=3 net.ipv4.ipfrag_high_thresh=134217728 \
+  net.core.rmem_max=16777216 net.core.rmem_default=16777216
 # the helper scripts document themselves as /fetch_ws/scripts/...; make that path exist here too
 [ -e "$HOME/fetch_ws/scripts" ] || ln -s src/Understory/pi/scripts "$HOME/fetch_ws/scripts"
 
@@ -67,7 +72,7 @@ else
 fi
 # --- 6. health check ---
 echo "Waiting for nodes (~20 s)..."
-sleep 12
+sleep 20
 state=$(in_scout "timeout 5 ros2 topic echo /mission/state --once --field data 2>/dev/null" | head -1)
 if [ -n "$state" ]; then echo "  /mission/state: $state"; else warn "no /mission/state (check ~/fetch_ws/logs/nav.log)"; fi
 if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q Translation; then

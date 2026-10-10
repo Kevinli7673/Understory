@@ -478,6 +478,48 @@ installed on it."*
 - Left running on the Pi: sensors, Foxglove, Quest endpoint and the Whisper node. Detector, species
   and localizer were stopped again (the Pi reached 70 °C in two minutes with them on).
 
+**Session 8, Sat 12:45 to 3:10 PM, on the Jetson (three chats; the board froze once).** Branch `jetson-bringup`.
+- **GPU image** `scout-ros-ai-gpu` built from `pi/jetson/Dockerfile.gpu` (13.6 GB, PyTorch 2.14.1 + CUDA).
+  The models were copied from the Pi's cache, so the Jetson runs offline.
+- **The board froze at about 1:50 PM** (watchdog reset) with detector, species and Whisper each in their
+  own GPU process. It has 8 GB and no swap, and each GPU process loads over 1 GB of CUDA libraries.
+  Three fixes, all in this branch:
+  - `ai_node` runs `detector_node` and `species_node` in one process. `AI_ONE_PROCESS=1` selects it in
+    `scout_ai_up.sh` and `ai_selftest.sh`. They are still two ROS nodes with the same topics.
+  - Both models run in half precision on a GPU (CPU is unchanged).
+  - Whisper stays on the CPU by default (`WHISPER_DEVICE=cpu`).
+- **Measured on the Jetson GPU** (`AI_ONE_PROCESS=1`, half precision, Nav2 and mapping running):
+  five-photo self-test PASS 5 of 5 with the same confidences as full precision, `/detections` 4.4 Hz
+  in the self-test and 8.1 Hz on the live camera (Pi CPU: 0.25 Hz). Peak board power 9.7 W; it was
+  14.6 W at full precision.
+- **Memory is still tight.** With the AI, Whisper, Nav2 and a desktop with Firefox open, about 1.0 GB
+  stays available and it dips to 0.7 GB while the models load. `~/fetch_ws/logs/mem_guard.sh` kills the
+  AI nodes under 700 MB so the board cannot freeze again; it fired twice. Closing Firefox frees about
+  1 GB. The Jetson image has no zram swap; turning it on needs sudo and was not done.
+- **Voice on the Jetson CPU** (`whisper-base.en`, synthetic clips, ROS domain 43): "come back home",
+  "keep going" and "manual" correct, "start survey" heard as "star survey", 3.5 to 6 s per clip.
+  The noise clip produced the word "you". Not tried with a real voice.
+- **"System throttled due to over-current"**: the counter (`/sys/class/hwmon/hwmon2/oc3_event_cnt`)
+  reached 47 between 1:54 and 2:09 PM, with two and three GPU processes loading at once in 25 W mode.
+  The limit is 5.05 A on the 5 V input. Since the changes above the highest reading is 3.4 A and the
+  counter has not moved in an hour. `~/fetch_ws/logs/power_watch.py` logs it once a second.
+- `scout-ai` is now created with `--init`. Without it stopped nodes stayed as zombies, and the
+  script's `pgrep` checks reported them as running.
+- **OPEN, blocks two-machine running: the Pi drops off the hotspot whenever the Jetson subscribes to
+  its topics.** Seen from 2:17 PM on; before that it ran for an hour. With nothing subscribed the Pi
+  pings at 0% loss. Subscribing to `/scan` alone from the Jetson gave 75% loss within 20 s, and the Pi
+  came back about 30 s after the Jetson's ROS nodes were stopped (three trials). The Pi's kernel log
+  shows its Wi-Fi chip stalling (`brcmfmac: brcmf_sdio_bus_rxctl: resumed on timeout`, and SDIO write
+  errors at 2:41 PM) and 17,862 failed transmissions. Both machines are on 2.4 GHz channel 6.
+  Not fixed. Tried on the Pi, at run time only, lost on restart: JPEG quality 95 to 60
+  (`ros2 param set /camera image_raw.compressed.jpeg_quality 60`, frames 55 KB to 22 KB) and Wi-Fi
+  power save off. Neither was enough. Not tried: the hotspot on 5 GHz (iPhone: turn off "Maximize
+  Compatibility"), an Ethernet cable between the two, reloading the Pi's Wi-Fi driver.
+- Left on the Jetson: containers `scout` and `scout-ai` up, **no ROS nodes running** (they take the Pi
+  off the network). Start with
+  `AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia AI_ONE_PROCESS=1 pi/jetson/jetson_up.sh`.
+- Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
+
 ## 12. Rules for anyone (or any agent) continuing
 
 - **Commits carry no Claude attribution.** No `Co-Authored-By`, no "Generated with" footer. Commit
