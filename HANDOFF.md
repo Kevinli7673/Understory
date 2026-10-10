@@ -543,6 +543,12 @@ installed on it."*
 - Left running at 3:40 PM. Pi: sensors, endpoint, Foxglove, Whisper. Jetson: mapping, Nav2, mission,
   panorama, `ai_node`, localizer. Start the Jetson side with `pi/jetson/jetson_up.sh`; on the Jetson it
   now defaults to the GPU image, one process and no Whisper.
+- **4:15 PM, both machines rebooted on request.** Pi: now on `main`; after the reboot `~/scout_up.sh`
+  then `~/scout_ai_up.sh --voice-only` brought back sensors (10 Hz, 15 Hz), endpoint and Whisper, and
+  a clip through the endpoint came back as text in 6.9 s, so `--voice-only` is tested on the Pi. The
+  Jetson's nodes kept running through the Pi's reboot and reconnected by themselves. Jetson: rebooted
+  at about 4:20 PM; **run `~/start_understory.sh` after it comes up** (memory guard, power logger,
+  then `jetson_up.sh`). Nothing starts by itself there except the two containers.
 - Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
 
 ## 12. Rules for anyone (or any agent) continuing
