@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# scout_ai_up.sh - start the plant AI: detector (OWL-ViT) -> species (BioCLIP) -> localizer (pins + readings).
+# scout_ai_up.sh - start the plant AI: detector (OWL-ViT) -> species (BioCLIP) -> localizer (pins + readings),
+# and the voice node (Whisper: /voice/audio from the Quest -> /voice/text).
 # Run on the HOST of whichever machine does the AI (Pi or Jetson), after scout_up.sh / jetson_up.sh.
 # It runs in its own container, `scout-ai`, next to `scout`, and talks to it over ROS.
 #
 #   ~/scout_ai_up.sh             start (safe to re-run; anything already running is left alone)
-#   ~/scout_ai_up.sh --stop      stop the three nodes (the container stays)
+#   ~/scout_ai_up.sh --stop      stop the AI nodes (the container stays)
 #   ~/scout_ai_up.sh --fake-sensors   also publish fake /sensors, until the ESP32 bridge exists
 #
 # Settings (environment variables):
@@ -13,6 +14,7 @@
 #   AI_THREADS=2                 CPU threads PyTorch may use. Keeps cores free for mapping and Nav2.
 #   DETECTOR_BACKEND=owlvit_torch | dummy        SPECIES_BACKEND=bioclip | dummy
 #   DETECTOR_THRESHOLD=0.05      lower finds more plants and more junk
+#   WHISPER_MODEL=openai/whisper-base.en   or openai/whisper-small.en (slower, more accurate), or none to skip it
 #   SCOUT_PEER=<other machine's IP>   same meaning as in scout_up.sh
 
 AI_IMAGE=${AI_IMAGE:-scout-ros-ai}
@@ -20,6 +22,7 @@ DET=${DETECTOR_BACKEND:-owlvit_torch}
 SPEC=${SPECIES_BACKEND:-bioclip}
 THRESH=${DETECTOR_THRESHOLD:-0.05}
 THREADS=${AI_THREADS:-2}
+WHISPER=${WHISPER_MODEL:-openai/whisper-base.en}
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
 HERE=$(dirname "$(readlink -f "$0")")
@@ -29,7 +32,7 @@ warn() { printf '\n\033[1;31m!!! WARNING: %s\033[0m\n\n' "$*"; }
 in_ai() { docker exec $PEER scout-ai bash -c "$SRC && $1"; }
 
 if [ "$1" = "--stop" ]; then
-  for pat in detector_node species_node localizer_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
+  for pat in detector_node species_node localizer_node whisper_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
   echo "AI nodes stopped."; exit 0
 fi
 
@@ -60,7 +63,7 @@ if [ "$DET" = dummy ] || [ -d "$HF/hub/models--google--owlvit-base-patch32" ]; t
 fi
 [ -n "$OFFLINE" ] && echo "Models are cached; running offline." || echo "First run: downloading models to $HF (about 1 GB, needs internet)..."
 
-# --- 3. the three nodes (detached, logs in ~/fetch_ws/logs) ---
+# --- 3. the nodes (detached, logs in ~/fetch_ws/logs) ---
 if ! in_ai "ros2 pkg executables scout_perception" | grep -q localizer_node; then
   warn "scout_perception is not built. On the Pi: ~/scout_shell.sh then  cd /fetch_ws && colcon build --symlink-install --packages-select scout_perception"; exit 1
 fi
@@ -72,6 +75,14 @@ start() {   # start <process pattern> <log name> <command>
 start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH"
 start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC"
 start localizer_node localizer "ros2 run scout_perception localizer_node"
+if [ "$WHISPER" != none ]; then
+  # Whisper has its own offline switch, so a missing voice model never forces the plant models online
+  PLANT_OFFLINE=$OFFLINE; OFFLINE=
+  if ls "$HF/hub/models--${WHISPER//\//--}"/snapshots/*/model.safetensors >/dev/null 2>&1; then OFFLINE='export HF_HUB_OFFLINE=1 &&'
+  else echo "Voice model $WHISPER is not on disk; downloading it (needs internet once)..."; fi
+  start whisper_node whisper "ros2 run scout_perception whisper_node --ros-args -p model:=$WHISPER"
+  OFFLINE=$PLANT_OFFLINE
+fi
 [ "$1" = "--fake-sensors" ] && start fake_sensors.py fake_sensors "python3 /fetch_ws/src/Understory/pi/scripts/fake_sensors.py"
 
 # --- 4. health check ---
@@ -90,6 +101,11 @@ if in_ai "timeout 60 ros2 topic echo /detections std_msgs/msg/String --once" >/d
 else warn "/detections is NOT publishing (see ~/fetch_ws/logs/detector.log; is the camera up?)"; fi
 docker exec scout-ai pgrep -f species_node >/dev/null && echo "  species node: running" || warn "species node is NOT running"
 docker exec scout-ai pgrep -f localizer_node >/dev/null && echo "  localizer: running" || warn "localizer is NOT running"
+if [ "$WHISPER" != none ]; then
+  if grep -q 'whisper node running' "$HOME/fetch_ws/logs/whisper.log" 2>/dev/null; then echo "  voice (whisper): running"
+  elif docker exec scout-ai pgrep -f whisper_node >/dev/null; then echo "  voice (whisper): still loading or downloading, see ~/fetch_ws/logs/whisper.log"
+  else warn "whisper node is NOT running. See ~/fetch_ws/logs/whisper.log"; fi
+fi
 echo "  /species and /survey/pins only appear while a listed plant is in view. Watch them with:"
 echo "    tail -f ~/fetch_ws/logs/localizer.log"
 docker exec scout-ai chown -R "$(id -u):$(id -g)" /fetch_ws/logs 2>/dev/null

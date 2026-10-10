@@ -29,7 +29,7 @@ follow the rules in section 12.
 | Pi and Jetson together | **Never tried** | |
 | Robot driving | **Not possible yet** | no ESP32 bridge in the repo, nothing consumes `/cmd_vel` |
 | `/sensors` from the ESP32 | **Does not exist** | `fake_sensors.py` stands in |
-| Whisper (`/voice/audio` -> `/voice/text`) | **Not written** | Quest already sends the audio (section 9) |
+| Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. **No human voice and no Quest clip tried yet** |
 | NanoOWL / TensorRT | Stub | speed upgrade only |
 | Logger, dashboard, Neon sync | Not in the repo | other owners |
 
@@ -102,6 +102,9 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 | `geometry.py` | bearing, LiDAR lookup, map projection, pin de-duplication. No ROS imports |
 | `test/test_geometry.py` | 14 unit tests for `geometry.py` |
 | `panorama_node.py` | `/survey/capture` -> 12 frames + bubble JSON + `capture_done`, pano as an extra |
+| `whisper_node.py` | `/voice/audio` (WAV bytes) -> `/voice/text`. Parameters: `model`, `min_seconds`, `min_rms` |
+| `voice.py` | WAV decoding, resampling, transcript clean-up. No ROS imports |
+| `test/test_voice.py` | 12 unit tests for `voice.py` |
 
 ## 5. How the AI chain works
 
@@ -178,6 +181,37 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
   The localizer reads the offsets from TF, so fixing the launch file fixes the pins.
 - With the robot unable to move, the map pose still turns during a `capture`, because odometry is
   dead-reckoned from `/cmd_vel`. Pins seen during that fake spin land in the wrong direction.
+
+## 5a. Voice (Whisper)
+
+`whisper_node` takes one push-to-talk clip from `/voice/audio` (`std_msgs/UInt8MultiArray`, the bytes
+of a complete WAV file, which is the format Kevin proposed and the Quest already sends) and publishes
+the transcript on `/voice/text`, lower case, no punctuation. The mission manager finds the command
+in it by keyword. `scout_ai_up.sh` starts it with the plant AI, in the `scout-ai` container.
+
+- Whisper runs through `transformers`, which the AI image already has. No image rebuild.
+- Default model `openai/whisper-base.en` (about 280 MB, downloaded on first start, then offline).
+  `WHISPER_MODEL=openai/whisper-small.en ~/scout_ai_up.sh` uses the larger model the plan names; it
+  has not been downloaded or timed. `WHISPER_MODEL=none` skips voice.
+- Measured on the Pi CPU: model loads in about 8 s; a 1 to 2 s clip takes about 2.5 s alone and
+  about 6 s while the detector is also running.
+- Tested with computer-generated speech (`espeak-ng`), not a person: "start survey" (heard as
+  "star survey"), "stop", "come back home", "take a picture", "manual", "keep going" all reached the
+  right command. A seventh, non-command sentence was transcribed wrongly, so expect errors on
+  longer speech.
+- Clips under 0.3 s or with RMS under 0.005 are dropped before the model runs. Louder background
+  noise still gets through: 3 s of pink noise came back as "you". That word is not a command, but
+  noise could in principle produce one. The Quest e-stop still overrides everything.
+- **Run it on one machine only.** Two Whisper nodes would publish every command twice.
+- Test without the Quest (on ROS domain 43, so the mission manager does not act on it):
+
+```bash
+# inside scout-ai, both commands with ROS_DOMAIN_ID=43
+ros2 run scout_perception whisper_node
+python3 /fetch_ws/src/Understory/pi/scripts/voice_test.py /fetch_ws/test_voice/*.wav
+```
+
+  `~/fetch_ws/test_voice/` on the Pi holds the synthetic clips. Any 16-bit WAV works.
 
 ## 6. Running on the Pi
 
@@ -315,7 +349,7 @@ photo cards, push-to-talk.
 | --- | --- | --- |
 | `/cmd_vel_teleop`, `/estop` | twist_mux | wired, but nothing drives the motors |
 | `/voice/text` (panel buttons) | mission manager | works |
-| `/voice/audio` (hold X) | Whisper node | **node not written** |
+| `/voice/audio` (hold X) | Whisper node | node written, not yet tried with a real Quest clip |
 
 His two requests in `AGENTS.md`:
 1. *Always publish the frames; pano optional.* **Done.** Frames go out first, then the bubble JSON
@@ -344,10 +378,8 @@ Things to tell Kevin:
    a bubble from real rotated frames (run `pi/scripts/camera_lock.sh` first; check the 12 yaws step
    by about 0.52 rad). Stop `fake_sensors.py` once the real `/sensors` is there.
 7. **Saturday night:** one full recorded mission as the fallback `AGENTS.md` asks for.
-8. **Whisper node** (`whisper_node` in `scout_perception`): subscribe `/voice/audio`
-   (`UInt8MultiArray`, bytes are a WAV file), decode with the `wave` module, run `small.en`, publish
-   lower-case text on `/voice/text`. The mission manager acts on `start`, `stop`, `return`, `manual`,
-   `capture`, `resume`. Lowest priority: the Quest panel buttons already publish those words.
+8. **Voice with a real person.** The Whisper node exists (section 5a) but has only heard a
+   synthetic voice. Hold X on the Quest, say each command, and read `~/fetch_ws/logs/whisper.log`.
 9. **NanoOWL + TensorRT**, and a PyTorch-versus-TensorRT speed number for the pitch.
 
 Waiting on teammates:
@@ -362,7 +394,7 @@ Waiting on teammates:
 
 - `/species` shape (section 5): get the team to agree, then add it to `AGENTS.md`.
 - Pin `embedding`: in or out of the published pin.
-- `/voice/audio` format: accept Kevin's proposal or not.
+- `/voice/audio` format: the Whisper node is built on Kevin's proposal. Confirm, then write it into `AGENTS.md`.
 - `AGENTS.md` says "code freeze Sun 11 AM; submit by 9:30 AM". One of those is wrong.
 
 ## 11. Session log
@@ -422,6 +454,30 @@ to document the changes for the Jetson handoff."*
 - Committed and pushed the work to branch `perception-pins` and opened PR #2 into `main`. The PR is
   **not merged**: Alvaro or Kevin has to merge it.
 
+**Session 7, Sat 12:35 PM, check after another Pi reboot.** *"You got disconnected again, check the
+previous chat and check that everything is connected. The Jetson is connected and Claude is being
+installed on it."*
+- The Pi had rebooted again (up 2 minutes). Hotspot `172.20.10.10`, clock within seconds of GitHub's,
+  LiDAR and Brio camera present, both containers up, 56 °C, not throttled. No ROS nodes were running.
+- **PR #2 is merged** (12:25 PM). The Pi's clone is now on `main` at `006a01a`. On the Jetson, clone
+  and stay on `main`; skip the `git checkout perception-pins` line in section 7.
+- Restarted with `~/scout_up.sh --nav`: `/scan` 10.0 Hz, camera 14.8 Hz, `/mission/state` `IDLE`,
+  TF `map -> base_link` ok, ports 10000 and 8765 listening. The AI was left stopped (heat).
+- A second device is on the hotspot at `172.20.10.14`, answering ping and with SSH open. It is
+  probably the Jetson; not confirmed. Nothing has been run on it from the Pi.
+- Before `jetson_up.sh` runs on the Jetson, the Pi must drop to sensors only:
+  `~/scout_down.sh --keep && ~/scout_up.sh`.
+- *"Start on the Whisper node."* Wrote `whisper_node.py`, `voice.py`, `test/test_voice.py` and
+  `pi/scripts/voice_test.py`, on branch `whisper-node`. `scout_ai_up.sh` starts the node and
+  `--stop` / `scout_down.sh` stop it. 26 `scout_perception` tests pass. Results are in section 5a.
+- **Pi and Jetson now talk.** Around 1:00 PM the Pi was switched to sensors only, and from 1:10 PM
+  the Pi could see `slam_toolbox`, Nav2, `mission_manager` and `panorama_node` running on another
+  machine, with `/mission/state` `IDLE` arriving on the Pi. This was seen from the Pi only.
+- One synthetic clip sent on the live domain: the Pi's Whisper node published its text and the
+  remote `mission_manager` was subscribed to `/voice/text`. Its log was not read to confirm receipt.
+- Left running on the Pi: sensors, Foxglove, Quest endpoint and the Whisper node. Detector, species
+  and localizer were stopped again (the Pi reached 70 °C in two minutes with them on).
+
 ## 12. Rules for anyone (or any agent) continuing
 
 - **Commits carry no Claude attribution.** No `Co-Authored-By`, no "Generated with" footer. Commit
@@ -446,7 +502,7 @@ To start a coding agent on the Jetson: open it in `~/fetch_ws/src/Understory` an
 # ---- Pi host ----
 ~/scout_up.sh                 # sensors + Foxglove + Quest endpoint
 ~/scout_up.sh --nav           # the above + mapping, Nav2, mission, panorama
-~/scout_ai_up.sh              # plant AI (add --fake-sensors, or --stop)
+~/scout_ai_up.sh              # plant AI + voice (add --fake-sensors, or --stop)
 ~/scout_down.sh --keep        # stop ROS, keep containers
 ~/scout_shell.sh              # sourced ROS shell in the scout container
 sudo nmcli con up hotspot     # if it fell back to eduroam
