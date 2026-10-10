@@ -503,6 +503,15 @@ installed on it."*
   reached 47 between 1:54 and 2:09 PM, with two and three GPU processes loading at once in 25 W mode.
   The limit is 5.05 A on the 5 V input. Since the changes above the highest reading is 3.4 A and the
   counter has not moved in an hour. `~/fetch_ws/logs/power_watch.py` logs it once a second.
+  **One more event at 4:04:44 PM** (count 48) with the board at about 2.0 A and 10 W, sampled 25 times a
+  second, so it was a spike shorter than 40 ms: several `ros2` commands started at that moment while
+  the GPU was busy. That is 1 event in two hours against 47 in fifteen minutes. The board slows its
+  clocks for an instant and shows the banner; nothing else happens. `sudo nvpmodel -m 0` (15 W mode)
+  should stop them at the cost of speed; not tried.
+- **Quest app on `main` (Kevin, 4 PM) checked against our side:** its contract classes match the pin,
+  bubble and reading JSON; its panel buttons send start / capture / resume / manual / return / stop on
+  `/voice/text`, all in the mission manager's vocabulary; Whisper's "star survey" still parses as start.
+  The app's notes say the endpoint is on the Jetson. It is on the Pi: `172.20.10.10`, port 10000.
 - `scout-ai` is now created with `--init`. Without it stopped nodes stayed as zombies, and the
   script's `pgrep` checks reported them as running.
 - **Pi dropping off the hotspot: fixed by moving the hotspot to 5 GHz** (iPhone: turn off "Maximize
