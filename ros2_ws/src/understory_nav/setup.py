@@ -20,7 +20,6 @@ setup(
     maintainer_email='mizbahateeq@gmail.com',
     description='Understory navigation + mission manager',
     license='MIT',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'mission_manager = understory_nav.mission_manager:main',

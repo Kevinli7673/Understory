@@ -13,6 +13,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
+from nav2_msgs.srv import ManageLifecycleNodes
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -51,6 +52,9 @@ class MissionManager(Node):
         self.done_timeout = p('capture_done_timeout_s', 15.0).value
         self.teleop_deadband = p('teleop_deadband', 0.05).value
         self.teleop_takes_over = p('teleop_takes_over', True).value
+        self.teleop_grace = p('teleop_grace_s', 1.0).value
+        self.accept_timeout = p('goal_accept_timeout_s', 10.0).value
+        self.nav_timeout = p('nav_timeout_s', 120.0).value
 
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
@@ -67,18 +71,24 @@ class MissionManager(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.nav = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.nav_lifecycle = self.create_client(
+            ManageLifecycleNodes, p('nav2_lifecycle_service', '/lifecycle_manager_navigation/manage_nodes').value)
+        self.nav_restart_t = -1e9
 
         self.state = None
         self.map_msg = None
         self.estopped = False
-        self.points = []
-        self.point_idx = 0
+        self.visited = []      # survey points done or skipped this mission
+        self.target = None
+        self.survey_on = False
         self.home = None
         self.bubble_count = 0
         self.done_ids = set()
         self.cap = None
         self.goal_handle = None
         self.goal_token = 0
+        self.command_t = -1e9   # last voice command; sticks are ignored briefly after it
+        self.goal_watch = None  # {'t0', 'accepted', 'on_result'} while a Nav2 goal is in flight
 
         self._set_state(ml.IDLE)
         self.create_timer(0.05, self._tick)
@@ -100,15 +110,18 @@ class MissionManager(Node):
 
     def _on_teleop(self, msg):
         moving = (abs(msg.linear.x) + abs(msg.linear.y) + abs(msg.angular.z)) > self.teleop_deadband
-        if moving and self.teleop_takes_over and self.state in ml.AUTONOMOUS_STATES:
+        # Grace period: a stick message already in flight shouldn't undo "come back".
+        recent_command = self._now() - self.command_t < self.teleop_grace
+        if moving and self.teleop_takes_over and self.state in ml.AUTONOMOUS_STATES and not recent_command:
             self.get_logger().info('teleop input, switching to MANUAL')
             self._manual()
 
     def _on_text(self, msg):
         cmd = ml.parse_command(msg.data)
-        survey_active = self.point_idx < len(self.points)
-        action = ml.decide(self.state, cmd, self.estopped, survey_active)
+        action = ml.decide(self.state, cmd, self.estopped, self.survey_on)
         self.get_logger().info(f'heard "{msg.data}" -> {cmd} -> {action}')
+        if action in ('start', 'resume', 'return', 'capture'):
+            self.command_t = self._now()
         if action == 'stop':
             self._stop()
         elif action == 'manual':
@@ -145,6 +158,7 @@ class MissionManager(Node):
 
     def _cancel_nav(self):
         self.goal_token += 1
+        self.goal_watch = None
         if self.goal_handle is not None:
             self.goal_handle.cancel_goal_async()
             self.goal_handle = None
@@ -167,29 +181,45 @@ class MissionManager(Node):
         if pose is None:
             self.get_logger().error('no map->base_link transform yet; is slam_toolbox running?')
             return
-        self.home = (pose[0], pose[1], pose[2])
-        if self.waypoints:
-            self.points = list(self.waypoints)
-        elif self.map_msg is not None:
-            m = self.map_msg
-            self.points = plan_survey_points(
-                m.data, m.info.width, m.info.height, m.info.resolution,
-                m.info.origin.position.x, m.info.origin.position.y,
-                (pose[0], pose[1]), self.spacing, self.clearance, self.max_points)
-        else:
-            self.points = []
-        if not self.points:
-            self.get_logger().warn('no survey points; capturing where we stand')
-            self.points = [(pose[0], pose[1])]
-        self.get_logger().info(f'survey points: {[(round(x, 2), round(y, 2)) for x, y in self.points]}')
-        self.point_idx = 0
+        self.home = pose
+        self.visited = []
+        self.survey_on = True
+        how = f'{len(self.waypoints)} fixed waypoints' if self.waypoints else 're-planning from /map as it grows'
+        self.get_logger().info(f'survey started ({how})')
         self._go_to_point()
 
+    def _next_target(self):
+        """Next survey point, or None when the survey is done.
+
+        Auto mode re-plans from the latest /map every time, so a survey started
+        on a barely-mapped room keeps expanding as the robot sees more.
+        """
+        if len(self.visited) >= (len(self.waypoints) if self.waypoints else self.max_points):
+            return None
+        if self.waypoints:
+            return self.waypoints[len(self.visited)]
+        pose = self._pose()
+        plan = []
+        if pose is not None and self.map_msg is not None:
+            m = self.map_msg
+            plan = plan_survey_points(
+                m.data, m.info.width, m.info.height, m.info.resolution,
+                m.info.origin.position.x, m.info.origin.position.y,
+                (pose[0], pose[1]), self.spacing, self.clearance, 1, visited=self.visited)
+        if plan:
+            return plan[0]
+        if not self.visited and pose is not None:
+            self.get_logger().warn('no safe survey point on the map yet; capturing where we stand')
+            return (pose[0], pose[1])
+        return None
+
     def _go_to_point(self):
-        if self.point_idx >= len(self.points):
+        self.target = self._next_target()
+        if self.target is None:
             self._return_home()
             return
-        x, y = self.points[self.point_idx]
+        x, y = self.target
+        self.get_logger().info(f'survey point {len(self.visited) + 1}: ({x:.2f}, {y:.2f})')
         self._set_state(ml.NEXT_POINT)
         self._send_goal(x, y, None, ml.SURVEYING, self._on_point_result)
 
@@ -206,9 +236,7 @@ class MissionManager(Node):
     def _send_goal(self, x, y, yaw, state_on_accept, on_result):
         self._cancel_nav()
         if not self.nav.server_is_ready():
-            # Fallback from AGENTS.md: manual drive + capture button.
-            self.get_logger().error('Nav2 not available; switching to MANUAL (drive + say "capture")')
-            self._set_state(ml.MANUAL)
+            self._nav2_down('is not available')
             return
         goal = NavigateToPose.Goal()
         goal.pose = PoseStamped()
@@ -222,19 +250,26 @@ class MissionManager(Node):
             goal.pose.pose.orientation.z = math.sin(yaw / 2.0)
             goal.pose.pose.orientation.w = math.cos(yaw / 2.0)
         token = self.goal_token
+        self.goal_watch = {'t0': self._now(), 'accepted': False, 'on_result': on_result}
+
+        def finish(status):
+            if token == self.goal_token:
+                self.goal_watch = None
+                on_result(status)
 
         def on_accept(future):
             if token != self.goal_token:
                 return
             handle = future.result()
             if not handle.accepted:
-                self.get_logger().warn(f'goal ({x:.2f}, {y:.2f}) rejected')
-                on_result(GoalStatus.STATUS_ABORTED)
+                # Nav2 rejects goals when it's inactive (e.g. after a heartbeat failure),
+                # not because a point is unreachable; don't burn through the survey.
+                self._nav2_down('rejected the goal')
                 return
             self.goal_handle = handle
+            self.goal_watch.update(t0=self._now(), accepted=True)
             self._set_state(state_on_accept)
-            handle.get_result_async().add_done_callback(
-                lambda f: token == self.goal_token and on_result(f.result().status))
+            handle.get_result_async().add_done_callback(lambda f: finish(f.result().status))
 
         self.nav.send_goal_async(goal).add_done_callback(on_accept)
 
@@ -243,16 +278,16 @@ class MissionManager(Node):
         if status == GoalStatus.STATUS_SUCCEEDED:
             self._start_capture(return_state=ml.NEXT_POINT)
         else:
-            self.get_logger().warn(f'could not reach point {self.point_idx}, skipping')
-            self.point_idx += 1
+            self.get_logger().warn(f'could not reach {self.target}, skipping')
+            self.visited.append(self.target)
             self._go_to_point()
 
     def _on_home_result(self, status):
         self.goal_handle = None
         if status != GoalStatus.STATUS_SUCCEEDED:
             self.get_logger().warn('could not reach home')
-        self.points, self.point_idx = [], 0
-        self.get_logger().info('mission complete')
+        self.survey_on = False
+        self.get_logger().info(f'mission complete: {self.bubble_count} bubbles')
         self._set_state(ml.IDLE)
 
     # ---------- 360 capture ----------
@@ -275,7 +310,45 @@ class MissionManager(Node):
     def _now(self):
         return self.get_clock().now().nanoseconds * 1e-9
 
+    def _check_goal(self):
+        """Nav2 can die or restart mid-goal and never answer; don't wait forever."""
+        w = self.goal_watch
+        if w is None:
+            return
+        waited = self._now() - w['t0']
+        limit = self.nav_timeout if w['accepted'] else self.accept_timeout
+        if waited <= limit:
+            return
+        if not w['accepted']:
+            self._nav2_down(f'did not answer a goal within {limit:.0f} s')
+            return
+        self.get_logger().warn(f'Nav2 did not finish the goal within {limit:.0f} s; giving up on it')
+        on_result = w['on_result']
+        self._cancel_nav()
+        on_result(GoalStatus.STATUS_ABORTED)
+
+    def _nav2_down(self, why):
+        """AGENTS.md fallback: manual drive + capture. The survey stays open for "resume"."""
+        self._cancel_nav()
+        self.cap = None
+        self._zero()
+        self.get_logger().error(
+            f'Nav2 {why}; switching to MANUAL (drive + say "capture", or "resume" once Nav2 is back)')
+        self._set_state(ml.MANUAL)
+        # Nav2's lifecycle manager doesn't bring nodes back after a heartbeat failure
+        # unless they restart; ask it to start them up again.
+        now = self._now()
+        if self.nav_lifecycle.service_is_ready() and now - self.nav_restart_t > 30.0:
+            self.nav_restart_t = now
+            self.get_logger().info('asking Nav2 lifecycle manager to start up again')
+            req = ManageLifecycleNodes.Request()
+            req.command = ManageLifecycleNodes.Request.STARTUP
+            self.nav_lifecycle.call_async(req).add_done_callback(
+                lambda f: self.get_logger().info(
+                    f'Nav2 startup {"ok" if f.result() and f.result().success else "failed"}'))
+
     def _tick(self):
+        self._check_goal()
         if self.state != ml.CAPTURING or self.cap is None:
             return
         c, now = self.cap, self._now()
@@ -312,7 +385,7 @@ class MissionManager(Node):
                     self.get_logger().warn(f'no capture_done for {c["id"]}, moving on')
                 self.cap = None
                 if c['return_state'] == ml.NEXT_POINT:
-                    self.point_idx += 1
+                    self.visited.append(self.target)
                     self._go_to_point()
                 else:
                     self._set_state(c['return_state'])

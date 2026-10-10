@@ -51,16 +51,20 @@ def _nearest_safe(safe, cell, max_r):
 
 
 def plan_survey_points(data, width, height, resolution, origin_x, origin_y,
-                       start_xy, spacing=1.0, clearance=0.35, max_points=10):
+                       start_xy, spacing=1.0, clearance=0.35, max_points=10,
+                       visited=(), gap_fill=0.1):
     """Return [(x, y), ...] in the map frame, ordered as a greedy tour from start_xy.
 
     data: OccupancyGrid.data (row-major, -1 unknown, 0..100 occupancy).
     Points lie on a `spacing` lattice, at least `clearance` m from obstacles and
-    unknown space, and reachable from the robot.
+    unknown space, reachable from the robot, and at least spacing/2 from any
+    `visited` point (so re-planning on a growing map only adds new places).
+    gap_fill: unknown slivers this thin (m) between far-apart LiDAR rays count as free.
     """
     grid = np.asarray(data, dtype=np.int16).reshape(height, width)
-    free = grid == 0
-    blocked = _dilate(~free, int(math.ceil(clearance / resolution)))
+    occupied = grid >= 50
+    free = (grid == 0) | (_dilate(grid == 0, int(round(gap_fill / resolution))) & (grid < 0))
+    blocked = _dilate(~free | occupied, int(math.ceil(clearance / resolution)))
     safe = free & ~blocked
 
     def to_cell(x, y):
@@ -84,7 +88,9 @@ def plan_survey_points(data, width, height, resolution, origin_x, origin_y,
     # Anchor the lattice on the robot so the first bubble is where it stands.
     ys = list(range(seed[0] % step, height, step))
     xs = list(range(seed[1] % step, width, step))
-    candidates = [to_xy((y, x)) for y in ys for x in xs if reachable[y, x]]
+    min_sep2 = (spacing / 2.0) ** 2
+    candidates = [p for p in (to_xy((y, x)) for y in ys for x in xs if reachable[y, x])
+                  if all((p[0] - v[0]) ** 2 + (p[1] - v[1]) ** 2 >= min_sep2 for v in visited)]
 
     tour = []
     cur = start_xy

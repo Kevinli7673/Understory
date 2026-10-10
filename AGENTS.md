@@ -12,13 +12,6 @@ Architecture line: **live on the edge (Jetson), deep in the cloud (AMD).**
 
 Honest framing: an indoor mecanum robot on the venue floor stands in for the field. Don't oversell in docs or Devpost copy.
 
-## Current status
-
-_Updated Sat Oct 10, ~4 AM._
-
-- **Kevin (Quest app):** Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207 + OpenXR, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub` (the one set of handlers ROS subscribers will also call). `BubbleRingBuilder` (pano cylinder / unstitched ring + pin markers) and `TabletopMap` (floor plan, bubbles, pins, robot) working in the editor; `ViewSwitcher` toggles them (A / Tab, click a bubble to open it). Branch `quest-app`. Next: ROS subscribers/publishers (teleop, e-stop, real robot pose), controller ray selection, first headset build.
-- **Open (Kevin → Alvaro):** `panorama_node` sends *either* the pano *or* the frames. cv2 stitcher output has no known start yaw (and is cropped / may not span 360°), so the Quest can't place pins on it. Proposal: **always publish the frames (`<bubble_id>/<index>`); pano is an optional extra.** The Quest app now shows the frame ring by default and uses the pano only when no frames arrive.
-
 ## Hackathon rules that affect code
 
 - Code freeze Sun 11 AM; submit by 9:30 AM. Favor working, demoable code over clean abstractions.
