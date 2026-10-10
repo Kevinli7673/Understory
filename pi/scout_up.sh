@@ -42,6 +42,11 @@ else
     -v /dev:/dev -v "$HOME/fetch_ws:/fetch_ws" scout-ros sleep infinity >/dev/null || exit 1
 fi
 docker exec scout mkdir -p /fetch_ws/logs
+# 70 KB camera frames cross the hotspot as ~50 IP fragments each. With the kernel defaults, lost fragments
+# sit in the reassembly queue for 30 s, fill it, and then no frame gets through at all (seen on the Jetson).
+# Not namespaced, so setting it from the privileged host-network container sets it for the host. Lost on reboot.
+docker exec scout sysctl -q -w net.ipv4.ipfrag_time=3 net.ipv4.ipfrag_high_thresh=134217728 \
+  net.core.rmem_max=16777216 net.core.rmem_default=16777216
 
 # --- 4. bringup + Quest endpoint (detached, logs in ~/fetch_ws/logs) ---
 if docker exec scout pgrep -f scout_bringup.launch.py >/dev/null; then

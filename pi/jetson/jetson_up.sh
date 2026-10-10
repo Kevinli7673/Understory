@@ -8,7 +8,8 @@
 #   ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 #   SCOUT_PEER=172.20.10.10 .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
 #   NO_AI=1 .../jetson_up.sh                        # mapping + mission only, no plant AI
-#   AI_IMAGE=<cuda image> AI_RUNTIME=nvidia .../jetson_up.sh   # GPU build of the AI container (HANDOFF.md)
+#   The plant AI uses the image scout-ros-ai-gpu when it exists (build: pi/jetson/Dockerfile.gpu, HANDOFF.md),
+#   with AI_ONE_PROCESS=1 and WHISPER_MODEL=none. Set AI_IMAGE / AI_RUNTIME / AI_ONE_PROCESS= / WHISPER_MODEL to override.
 
 SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && source /fetch_ws/install/setup.bash'
 PEER=${SCOUT_PEER:+-e ROS_STATIC_PEERS=$SCOUT_PEER}
@@ -36,6 +37,11 @@ else
     -v /dev:/dev -v "$HOME/fetch_ws:/fetch_ws" scout-ros sleep infinity >/dev/null || exit 1
 fi
 docker exec scout mkdir -p /fetch_ws/logs
+# 70 KB camera frames cross the hotspot as ~50 IP fragments each. With the kernel defaults, lost fragments
+# sit in the reassembly queue for 30 s, fill it, and then no frame gets through at all (seen on the Jetson).
+# Not namespaced, so setting it from the privileged host-network container sets it for the host. Lost on reboot.
+docker exec scout sysctl -q -w net.ipv4.ipfrag_time=3 net.ipv4.ipfrag_high_thresh=134217728 \
+  net.core.rmem_max=16777216 net.core.rmem_default=16777216
 # the helper scripts document themselves as /fetch_ws/scripts/...; make that path exist here too
 [ -e "$HOME/fetch_ws/scripts" ] || ln -s src/Understory/pi/scripts "$HOME/fetch_ws/scripts"
 
@@ -67,7 +73,7 @@ else
 fi
 # --- 6. health check ---
 echo "Waiting for nodes (~20 s)..."
-sleep 12
+sleep 20
 state=$(in_scout "timeout 5 ros2 topic echo /mission/state --once --field data 2>/dev/null" | head -1)
 if [ -n "$state" ]; then echo "  /mission/state: $state"; else warn "no /mission/state (check ~/fetch_ws/logs/nav.log)"; fi
 if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q Translation; then
@@ -82,6 +88,12 @@ done
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs /fetch_ws/build /fetch_ws/install /fetch_ws/log 2>/dev/null
 # --- 7. plant AI: detector + species + localizer in the scout-ai container (NO_AI=1 skips it) ---
 if [ -z "$NO_AI" ]; then
+  # Jetson defaults (set any of them yourself to override): the GPU image if it has been built, both
+  # models in one process, and no Whisper here - it runs on the Pi (~/scout_ai_up.sh --voice-only).
+  if [ -z "$AI_IMAGE" ] && docker image inspect scout-ros-ai-gpu >/dev/null 2>&1; then
+    export AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=${AI_RUNTIME:-nvidia}
+  fi
+  export AI_ONE_PROCESS=${AI_ONE_PROCESS-1} WHISPER_MODEL=${WHISPER_MODEL:-none}
   "$(dirname "$(readlink -f "$0")")/../scout_ai_up.sh"
 fi
 echo "Done. Stop with: docker exec scout pkill -INT -f 'ros2 launch'; $(dirname "$(readlink -f "$0")")/../scout_ai_up.sh --stop"

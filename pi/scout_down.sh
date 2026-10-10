@@ -17,7 +17,7 @@ for pat in 'ros2 launch' 'ros2 bag record' default_server_endpoint usb_cam_node_
 done
 # the plant AI lives in its own container (scout_ai_up.sh); it is left running, only its nodes stop
 if [ "$(docker inspect -f '{{.State.Running}}' scout-ai 2>/dev/null)" = "true" ]; then
-  for pat in detector_node species_node localizer_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
+  for pat in detector_node species_node localizer_node whisper_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
 fi
 sleep 8
 # anything still alive gets a hard kill
