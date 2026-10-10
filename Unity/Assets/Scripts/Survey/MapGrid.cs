@@ -47,6 +47,14 @@ namespace Understory
             return tex;
         }
 
+        /// <summary>From nav_msgs/OccupancyGrid fields (same layout, so the data is used as-is).</summary>
+        public static MapGrid FromOccupancyGrid(int width, int height, float resolution, float originX, float originY, sbyte[] data)
+        {
+            if (data == null || data.Length != width * height)
+                throw new FormatException($"OccupancyGrid data length {data?.Length} != {width}x{height}");
+            return new MapGrid { Width = width, Height = height, Resolution = resolution, OriginX = originX, OriginY = originY, Cells = data };
+        }
+
         /// <summary>Parse map_saver_cli output (binary P5 .pgm + .yaml).</summary>
         public static MapGrid FromPgm(byte[] pgm, string yaml)
         {

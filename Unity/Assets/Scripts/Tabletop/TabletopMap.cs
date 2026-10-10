@@ -32,6 +32,14 @@ namespace Understory
 
         /// <summary>A bubble disc was picked (editor click now, controller ray later).</summary>
         public event Action<string> BubbleSelected;
+        /// <summary>Board resized (map arrived/changed). Attachments (buttons, camera screen) re-place.</summary>
+        public event Action LayoutChanged;
+
+        /// <summary>Table root: +z points away from the viewer, slab top at local y = 0. Null until Start.</summary>
+        public Transform Root => root;
+        /// <summary>Half width (x) and half depth (y) of the slab top, root-local meters.</summary>
+        public Vector2 HalfExtents { get; private set; }
+        public Material BaseMaterial => material;
 
         static readonly Color SlabColor = new Color(0.10f, 0.11f, 0.12f);
         static readonly Color BubbleColor = new Color(0.2f, 0.85f, 0.95f);
@@ -57,6 +65,10 @@ namespace Understory
         readonly Dictionary<string, GameObject> pins = new Dictionary<string, GameObject>();
         readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         Vector2? robotPos;
+        float lastRealPose = -100f;
+        float nextStatus;
+        RosSurveySource rosSource;
+        TeleopController teleop;
         float robotYaw;
 
         bool visible = true;
@@ -81,6 +93,9 @@ namespace Understory
             hub.BubbleReceived += OnBubble;
             hub.PinAdded += OnPin;
             hub.ReadingReceived += OnReading;
+            hub.RobotPoseUpdated += OnRobotPose;
+            rosSource = FindAnyObjectByType<RosSurveySource>();
+            teleop = FindAnyObjectByType<TeleopController>();
             hub.MissionStateChanged += OnState;
             hub.Cleared += OnCleared;
 
@@ -98,6 +113,7 @@ namespace Understory
                 hub.BubbleReceived -= OnBubble;
                 hub.PinAdded -= OnPin;
                 hub.ReadingReceived -= OnReading;
+                hub.RobotPoseUpdated -= OnRobotPose;
                 hub.MissionStateChanged -= OnState;
                 hub.Cleared -= OnCleared;
             }
@@ -108,6 +124,13 @@ namespace Understory
 
         void Update()
         {
+            // Link status / e-stop change without hub events, so refresh the status line twice a second.
+            if (Time.unscaledTime >= nextStatus)
+            {
+                UpdateStatus();
+                nextStatus = Time.unscaledTime + 0.5f;
+            }
+
             if (XRSettings.isDeviceActive) return;
             var kb = Keyboard.current;
             if (kb != null && kb.cKey.wasPressedThisFrame) Recenter();
@@ -220,9 +243,16 @@ namespace Understory
             UpdateStatus();
         }
 
+        void OnRobotPose(Vector3 pose)
+        {
+            lastRealPose = Time.unscaledTime;
+            SetRobotPose(pose.x, pose.y, pose.z);
+        }
+
         void OnReading(Reading r)
         {
-            // Readings are stamped with the robot's position; heading from motion until real TF is wired.
+            // Readings are stamped with the robot's position: a fallback when no real /pose is coming in.
+            if (Time.unscaledTime - lastRealPose < 2f) return;
             float yaw = robotYaw;
             if (robotPos.HasValue)
             {
@@ -277,6 +307,8 @@ namespace Understory
             // ROS x -> Unity z (depth), ROS y -> Unity x (width).
             slab.transform.localScale = new Vector3(spanY * scale + 2 * Margin, SlabThickness, spanX * scale + 2 * Margin);
             slab.transform.localPosition = Vector3.down * (SlabThickness / 2f);
+            HalfExtents = new Vector2(slab.transform.localScale.x / 2f, slab.transform.localScale.z / 2f);
+            LayoutChanged?.Invoke();
 
             floor.SetActive(map != null);
             if (map != null)
@@ -352,7 +384,10 @@ namespace Understory
             int invasive = hub.Pins.Values.Count(p => p.Invasive);
             int total = hub.Pins.Count;
             string state = hub.State == MissionState.Unknown ? "WAITING" : hub.State.ToString();
-            status.text = $"{state}   ·   invasives {invasive}   ·   plants {total}   ·   spots {hub.Bubbles.Count}";
+            string line1 = $"{state}   ·   invasives {invasive}   ·   plants {total}   ·   spots {hub.Bubbles.Count}";
+            string link = rosSource != null ? rosSource.StatusText : "FAKE";
+            string estop = teleop != null && teleop.EStopped ? "   ·   <color=#ff4433>E-STOP</color>" : "";
+            status.text = $"{line1}\n<size=36>{link}{estop}</size>";
         }
 
         GameObject Primitive(PrimitiveType type, string name, Color color, Transform parent = null)

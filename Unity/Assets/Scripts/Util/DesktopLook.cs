@@ -6,11 +6,14 @@ namespace Understory
 {
     /// <summary>
     /// Editor/desktop testing without a headset: hold right mouse and drag to look around.
-    /// Does nothing while an XR device is active. Put it on the Main Camera.
+    /// Does nothing while an XR device is active. Put it on the camera, or on the OVRCameraRig root
+    /// (tracking overwrites the eye camera's own rotation).
     /// </summary>
     public class DesktopLook : MonoBehaviour
     {
         [SerializeField] float sensitivity = 0.15f;
+        [Tooltip("Without a headset a floor-level rig has its eyes on the floor; lift it this much (meters).")]
+        [SerializeField] float desktopEyeHeight;
 
         float yaw, pitch;
 
@@ -19,6 +22,7 @@ namespace Understory
             var e = transform.eulerAngles;
             yaw = e.y;
             pitch = e.x > 180f ? e.x - 360f : e.x;
+            if (!XRSettings.isDeviceActive && desktopEyeHeight > 0f) transform.position += Vector3.up * desktopEyeHeight;
         }
 
         void Update()

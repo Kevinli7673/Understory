@@ -1,5 +1,7 @@
 using System.IO;
 using UnityEditor;
+using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEngine;
 
 namespace Understory.EditorTools
@@ -11,13 +13,16 @@ namespace Understory.EditorTools
 
         /// <summary>Headset builds can't read the repo, so copy fake missions into StreamingAssets before building.</summary>
         [MenuItem("Understory/Copy Fake Data To StreamingAssets")]
-        static void CopyToStreamingAssets()
+        static void CopyFromMenu()
         {
-            if (!Directory.Exists(RepoMissions))
-            {
+            if (!CopyToStreamingAssets())
                 EditorUtility.DisplayDialog("Fake data missing", $"{RepoMissions} not found.\nRun: python fake_data/generate.py", "OK");
-                return;
-            }
+        }
+
+        /// <summary>Returns false if fake_data/missions doesn't exist.</summary>
+        public static bool CopyToStreamingAssets()
+        {
+            if (!Directory.Exists(RepoMissions)) return false;
             if (Directory.Exists(StreamingMissions)) Directory.Delete(StreamingMissions, true);
             foreach (var src in Directory.GetFiles(RepoMissions, "*", SearchOption.AllDirectories))
             {
@@ -27,6 +32,20 @@ namespace Understory.EditorTools
             }
             AssetDatabase.Refresh();
             Debug.Log($"[FakeData] Copied {RepoMissions} -> {StreamingMissions}");
+            return true;
+        }
+    }
+
+    /// <summary>Every Android build gets fresh fake missions, so the headset can always replay.</summary>
+    class FakeDataBuildStep : IPreprocessBuildWithReport
+    {
+        public int callbackOrder => 0;
+
+        public void OnPreprocessBuild(BuildReport report)
+        {
+            if (report.summary.platform != BuildTarget.Android) return;
+            if (!FakeDataMenu.CopyToStreamingAssets())
+                Debug.LogWarning("[FakeData] fake_data/missions not found; the headset build has no replay data.");
         }
     }
 }

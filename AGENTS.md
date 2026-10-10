@@ -14,9 +14,11 @@ Honest framing: an indoor mecanum robot on the venue floor stands in for the fie
 
 ## Current status
 
-_Updated Sat Oct 10, ~4 AM._
+_Updated Sat Oct 10, ~6:30 AM._
 
-- **Kevin (Quest app):** Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207 + OpenXR, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub` (the one set of handlers ROS subscribers will also call). `BubbleRingBuilder` (pano cylinder / unstitched ring + pin markers) and `TabletopMap` (floor plan, bubbles, pins, robot) working in the editor; `ViewSwitcher` toggles them (A / Tab, click a bubble to open it). Branch `quest-app`. Next: ROS subscribers/publishers (teleop, e-stop, real robot pose), controller ray selection, first headset build.
+- **Kevin (Quest app):** Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub`. `BubbleRingBuilder` + `TabletopMap` + `ViewSwitcher` (A / Tab, click a disc) tested in the editor, merged to `main`.
+  - **Written + compiling, not yet tested on ROS or the headset** (branch `quest-app`): `RosSurveySource` (survey topics, `/map`, `/mission/state`, `/pose` → hub; fake replay stops on the first real message), `TeleopController` (left stick drive/strafe, right stick turn → `/cmd_vel_teleop` only while held; **B** toggles `/estop`; editor WASD/QE/Space), `MissionPanel` (buttons → `/voice/text` keywords start/capture/resume/manual/return/stop), `SpeciesAlert` (popup + buzz per new species), `CameraScreen` (`/camera/image/compressed` behind the table), `ControllerPointer` (right-hand ray + trigger). One-click scene/player setup: **Understory → Set Up Quest Rig and Player Settings** (needs `com.unity.xr.openxr` + OpenXR/Meta Quest enabled on Android first).
+  - **Jetson IP on the headset:** `echo <ip> > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`, restart the app. Table status line shows `LIVE <ip>` / `FAKE · connecting <ip>`.
 - **Open (Kevin → Alvaro):** `panorama_node` sends *either* the pano *or* the frames. cv2 stitcher output has no known start yaw (and is cropped / may not span 360°), so the Quest can't place pins on it. Proposal: **always publish the frames (`<bubble_id>/<index>`); pano is an optional extra.** The Quest app now shows the frame ring by default and uses the pano only when no frames arrive.
 
 ## Hackathon rules that affect code

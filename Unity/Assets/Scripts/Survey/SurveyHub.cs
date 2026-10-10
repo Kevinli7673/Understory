@@ -27,6 +27,8 @@ namespace Understory
         public event Action<Reading> ReadingReceived;
         public event Action<MissionState> MissionStateChanged;
         public event Action<MapGrid> MapUpdated;
+        /// <summary>Robot pose in the ROS map frame (x, y meters, yaw radians), e.g. from slam_toolbox /pose.</summary>
+        public event Action<Vector3> RobotPoseUpdated;
         /// <summary>Fires when Clear() wipes state, so views can tear down.</summary>
         public event Action Cleared;
 
@@ -37,6 +39,8 @@ namespace Understory
         public readonly HashSet<string> SpeciesSeen = new HashSet<string>();
         public MapGrid Map { get; private set; }
         public MissionState State { get; private set; } = MissionState.Unknown;
+        /// <summary>Latest (x, y, yaw) from HandleRobotPose; null until one arrives.</summary>
+        public Vector3? RobotPose { get; private set; }
 
         void Awake()
         {
@@ -124,6 +128,14 @@ namespace Understory
             MapUpdated?.Invoke(map);
         }
 
+        /// <summary>Robot pose, ROS map frame. Not logged (arrives many times a second).</summary>
+        public void HandleRobotPose(float x, float y, float yaw)
+        {
+            var pose = new Vector3(x, y, yaw);
+            RobotPose = pose;
+            RobotPoseUpdated?.Invoke(pose);
+        }
+
         /// <summary>Wipe all state (new mission / restarting fake playback).</summary>
         public void Clear()
         {
@@ -135,6 +147,7 @@ namespace Understory
             SpeciesSeen.Clear();
             Map = null;
             State = MissionState.Unknown;
+            RobotPose = null;
             Cleared?.Invoke();
         }
 
