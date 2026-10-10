@@ -120,7 +120,7 @@ This fallback has not been tested with two machines.
 ## Known gaps
 
 - No GPU container for the Jetson yet, so the AI runs on the CPU everywhere. `nanoowl_trt` is still a stub.
-- No Whisper node: `/voice/audio` from the Quest has no consumer.
+- The Whisper node (`/voice/audio` -> `/voice/text`, started by `scout_ai_up.sh`) has only been tested with synthetic speech.
 - No ESP32 bridge: nothing drives the motors and nothing publishes the real `/sensors`.
 - The `/species` JSON is not in `AGENTS.md` yet (shape in `HANDOFF.md`, section 5).
 - TF offsets in `scout_bringup.launch.py` are placeholders (`laser` z 0.15, `camera` x 0.08 z 0.10).

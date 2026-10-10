@@ -23,6 +23,7 @@ setup(
             'panorama_node = scout_perception.panorama_node:main',
             'species_node = scout_perception.species_node:main',
             'localizer_node = scout_perception.localizer_node:main',
+            'whisper_node = scout_perception.whisper_node:main',
         ],
     },
 )
