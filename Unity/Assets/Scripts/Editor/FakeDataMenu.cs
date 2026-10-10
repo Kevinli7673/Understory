@@ -46,6 +46,24 @@ namespace Understory.EditorTools
             if (report.summary.platform != BuildTarget.Android) return;
             if (!FakeDataMenu.CopyToStreamingAssets())
                 Debug.LogWarning("[FakeData] fake_data/missions not found; the headset build has no replay data.");
+            CopySplats();
+        }
+
+        /// <summary>splat/out/&lt;id&gt;/scene.splat (AMD pipeline output) -> StreamingAssets/splat/&lt;id&gt;/ for SplatView.</summary>
+        static void CopySplats()
+        {
+            var src = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "splat", "out"));
+            var dst = Path.Combine(Application.streamingAssetsPath, "splat");
+            if (Directory.Exists(dst)) Directory.Delete(dst, true);
+            if (!Directory.Exists(src)) return;
+            foreach (var file in Directory.GetFiles(src, "scene.splat", SearchOption.AllDirectories))
+            {
+                var target = Path.Combine(dst, Path.GetRelativePath(src, file));
+                Directory.CreateDirectory(Path.GetDirectoryName(target));
+                File.Copy(file, target, true);
+                Debug.Log($"[FakeData] splat -> {target}");
+            }
+            AssetDatabase.Refresh();
         }
     }
 }

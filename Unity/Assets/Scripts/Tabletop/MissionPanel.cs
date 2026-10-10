@@ -22,6 +22,7 @@ namespace Understory
         /// <summary>Local-only buttons start with '#': raised on Pressed, never published.</summary>
         public const string CompareKeyword = "#compare";
         public const string SensorsKeyword = "#sensors";
+        public const string ModelKeyword = "#model";
 
         static readonly (string label, string keyword, Color color)[] Buttons =
         {
@@ -33,6 +34,7 @@ namespace Understory
             ("Stop mission", "stop", new Color(0.6f, 0.2f, 0.15f)),
             ("Compare before", CompareKeyword, new Color(0.4f, 0.25f, 0.55f)),
             ("Sensor map", SensorsKeyword, new Color(0.4f, 0.25f, 0.55f)),
+            ("3D model", ModelKeyword, new Color(0.4f, 0.25f, 0.55f)),
         };
 
         const float ButtonW = 0.13f, ButtonD = 0.045f, Gap = 0.012f, Tilt = 35f;

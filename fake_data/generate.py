@@ -12,6 +12,7 @@ robot start pose at world (1, 1)), so this map lines up with the nav sim.
 import json
 import math
 import random
+import struct
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -164,11 +165,48 @@ def write_crop(d, pin):
 
 
 # --- mission ------------------------------------------------------------------
+def write_splat(d, plants, rng):
+    """Fake AMD-pipeline output (splat/README.md format, ROS map frame): 32 bytes per splat,
+    float32 xyz | float32 scale xyz | uint8 rgba | uint8 quat wxyz (q*128+128). Floor, walls, soil beds and a
+    foliage blob per plant, so the Quest's 3D tabletop model can be tested without the W7900."""
+    out = bytearray()
+
+    def splat(x, y, z, size, rgb):
+        r, g, b = (max(0, min(255, int(c + rng.gauss(0, 10)))) for c in rgb)
+        out.extend(struct.pack('<3f3f4B4B', x, y, z, size, size, size, r, g, b, 255, 255, 128, 128, 128))
+
+    x0, y0, x1, y1 = ROOM
+    step = 0.12
+    nx, ny = int((x1 - x0) / step), int((y1 - y0) / step)
+    for i in range(nx + 1):                     # floor
+        for j in range(ny + 1):
+            splat(x0 + i * step + rng.uniform(-0.03, 0.03), y0 + j * step + rng.uniform(-0.03, 0.03), 0.0, 0.05, (176, 160, 130))
+    perimeter = [(x0, y0, x1, y0), (x1, y0, x1, y1), (x1, y1, x0, y1), (x0, y1, x0, y0)]
+    for ax, ay, bx, by in perimeter:            # walls, 0.8 m high
+        n = int(math.hypot(bx - ax, by - ay) / 0.05)
+        for k in range(n + 1):
+            for h in range(17):
+                splat(ax + (bx - ax) * k / n, ay + (by - ay) * k / n, h * 0.05, 0.03, (150, 150, 155))
+    for bx0, by0, bx1, by1 in BOXES:            # plant beds: soil
+        for i in range(int((bx1 - bx0) / 0.05) + 1):
+            for j in range(int((by1 - by0) / 0.05) + 1):
+                splat(bx0 + i * 0.05, by0 + j * 0.05, 0.08 + rng.uniform(0, 0.04), 0.03, (95, 70, 45))
+    for x, y, label, invasive in plants:         # plants: foliage blob; Brazilian pepper gets red berries
+        for _ in range(140):
+            a, rad, h = rng.uniform(0, 2 * math.pi), abs(rng.gauss(0, 0.12)), rng.uniform(0.05, 0.6)
+            berry = label == 'Brazilian pepper' and rng.random() < 0.25
+            color = (200, 30, 30) if berry else ((60, 120, 40) if invasive else (70, 150, 70))
+            splat(x + rad * math.cos(a), y + rad * math.sin(a), h, 0.025, color)
+    (d / 'scene.splat').write_bytes(bytes(out))
+    return len(out) // 32
+
+
 def make_mission(mission_id, plants, t0, rng):
     d = OUT / mission_id
     (d / 'frames').mkdir(parents=True, exist_ok=True)
     (d / 'crops').mkdir(parents=True, exist_ok=True)
     write_map(d)
+    n_splats = write_splat(d, plants, random.Random(f'{SEED}-{mission_id}-splat'))
 
     # Each plant is pinned from its nearest bubble.
     def nearest(x, y):
@@ -241,7 +279,7 @@ def make_mission(mission_id, plants, t0, rng):
             for row in rows:
                 f.write(json.dumps(row) + '\n')
     inv = sum(p['invasive'] for p in pins)
-    print(f'{mission_id}: {len(bubbles)} bubbles, {len(pins)} pins ({inv} invasive), {len(readings)} readings')
+    print(f'{mission_id}: {len(bubbles)} bubbles, {len(pins)} pins ({inv} invasive), {len(readings)} readings, {n_splats} splats')
 
 
 def main():
