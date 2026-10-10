@@ -6,3 +6,21 @@ ros2_ws/install/
 ros2_ws/log/
 out/
 splat/out/
+
+# Unity
+Unity/[Ll]ibrary/
+Unity/[Tt]emp/
+Unity/[Oo]bj/
+Unity/[Bb]uild/
+Unity/[Bb]uilds/
+Unity/[Ll]ogs/
+Unity/[Uu]ser[Ss]ettings/
+Unity/*.csproj
+Unity/*.sln
+Unity/*.slnx
+Unity/*.apk
+Unity/*.aab
+Unity/Assets/StreamingAssets/fake_data/
+Unity/Assets/StreamingAssets/fake_data.meta
+Unity/Assets/StreamingAssets/splat/
+Unity/Assets/StreamingAssets/splat.meta

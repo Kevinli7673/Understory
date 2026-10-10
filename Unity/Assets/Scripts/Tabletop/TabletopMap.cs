@@ -32,6 +32,25 @@ namespace Understory
 
         /// <summary>A bubble disc was picked (editor click now, controller ray later).</summary>
         public event Action<string> BubbleSelected;
+        /// <summary>A plant pin was picked (pin_id). PinCard shows its photo; picking it again opens its bubble.</summary>
+        public event Action<string> PinSelected;
+        /// <summary>Board resized (map arrived/changed). Attachments (buttons, camera screen) re-place.</summary>
+        public event Action LayoutChanged;
+
+        /// <summary>Table root: +z points away from the viewer, slab top at local y = 0. Null until Start.</summary>
+        public Transform Root => root;
+        /// <summary>Half width (x) and half depth (y) of the slab top, root-local meters.</summary>
+        public Vector2 HalfExtents { get; private set; }
+        public Material BaseMaterial => material;
+        /// <summary>Parent for anything placed in map coordinates (local positions from BoardPosition).</summary>
+        public Transform MapRoot => mapRoot;
+        /// <summary>Extra status lines from attachments (before/after, sensor map); null/empty = no line.</summary>
+        public readonly List<Func<string>> StatusProviders = new List<Func<string>>();
+        /// <summary>Board meters per map meter.</summary>
+        public float Scale => scale;
+
+        /// <summary>ROS map-frame (x, y) -> MapRoot-local position on the board. Changes on LayoutChanged.</summary>
+        public Vector3 BoardPosition(float x, float y) => BoardPos(x, y);
 
         static readonly Color SlabColor = new Color(0.10f, 0.11f, 0.12f);
         static readonly Color BubbleColor = new Color(0.2f, 0.85f, 0.95f);
@@ -42,6 +61,7 @@ namespace Understory
         const float Margin = 0.04f;
         const float DefaultSpan = 10f; // meters shown before the first /map
         const float SelectRadius = 0.06f; // on the board, meters
+        const float PinPickRadius = 0.025f; // ray-to-pin-head distance, meters
 
         Transform root, mapRoot;
         GameObject slab, floor, robot;
@@ -57,6 +77,10 @@ namespace Understory
         readonly Dictionary<string, GameObject> pins = new Dictionary<string, GameObject>();
         readonly List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
         Vector2? robotPos;
+        float lastRealPose = -100f;
+        float nextStatus;
+        RosSurveySource rosSource;
+        TeleopController teleop;
         float robotYaw;
 
         bool visible = true;
@@ -81,6 +105,9 @@ namespace Understory
             hub.BubbleReceived += OnBubble;
             hub.PinAdded += OnPin;
             hub.ReadingReceived += OnReading;
+            hub.RobotPoseUpdated += OnRobotPose;
+            rosSource = FindAnyObjectByType<RosSurveySource>();
+            teleop = FindAnyObjectByType<TeleopController>();
             hub.MissionStateChanged += OnState;
             hub.Cleared += OnCleared;
 
@@ -98,6 +125,7 @@ namespace Understory
                 hub.BubbleReceived -= OnBubble;
                 hub.PinAdded -= OnPin;
                 hub.ReadingReceived -= OnReading;
+                hub.RobotPoseUpdated -= OnRobotPose;
                 hub.MissionStateChanged -= OnState;
                 hub.Cleared -= OnCleared;
             }
@@ -108,6 +136,13 @@ namespace Understory
 
         void Update()
         {
+            // Link status / e-stop change without hub events, so refresh the status line twice a second.
+            if (Time.unscaledTime >= nextStatus)
+            {
+                UpdateStatus();
+                nextStatus = Time.unscaledTime + 0.5f;
+            }
+
             if (XRSettings.isDeviceActive) return;
             var kb = Keyboard.current;
             if (kb != null && kb.cKey.wasPressedThisFrame) Recenter();
@@ -138,6 +173,24 @@ namespace Understory
         public bool TrySelect(Ray ray)
         {
             if (!visible || root == null) return false;
+
+            // Pins stand up off the board: pick by distance from the ray to each pin head.
+            string bestPin = null;
+            float bestPinD = PinPickRadius;
+            foreach (var kv in pins)
+            {
+                var head = kv.Value.transform.Find("Head");
+                if (head == null) continue;
+                float d = Vector3.Cross(ray.direction, head.position - ray.origin).magnitude;
+                if (d < bestPinD) { bestPinD = d; bestPin = kv.Key; }
+            }
+            if (bestPin != null)
+            {
+                Debug.Log($"[Tabletop] pin {bestPin}");
+                PinSelected?.Invoke(bestPin);
+                return true;
+            }
+
             var plane = new Plane(root.up, mapRoot.position);
             if (!plane.Raycast(ray, out float dist)) return false;
             var hit = mapRoot.InverseTransformPoint(ray.GetPoint(dist));
@@ -168,6 +221,7 @@ namespace Understory
             robot.SetActive(true);
             robot.transform.localPosition = BoardPos(x, y);
             robot.transform.localRotation = RosCoords.ToUnityRotation(yaw);
+            AddTrailPoint(x, y);
         }
 
         // ---- hub events ----
@@ -220,9 +274,16 @@ namespace Understory
             UpdateStatus();
         }
 
+        void OnRobotPose(Vector3 pose)
+        {
+            lastRealPose = Time.unscaledTime;
+            SetRobotPose(pose.x, pose.y, pose.z);
+        }
+
         void OnReading(Reading r)
         {
-            // Readings are stamped with the robot's position; heading from motion until real TF is wired.
+            // Readings are stamped with the robot's position: a fallback when no real /pose is coming in.
+            if (Time.unscaledTime - lastRealPose < 2f) return;
             float yaw = robotYaw;
             if (robotPos.HasValue)
             {
@@ -243,12 +304,38 @@ namespace Understory
             placed.Clear();
             robotPos = null;
             robot.SetActive(false);
+            trailRos.Clear();
+            RedrawTrail();
             map = null;
             Relayout();
             UpdateStatus();
         }
 
         // ---- layout ----
+
+        // ---- robot trail (where the robot has driven this mission) ----
+
+        const float TrailStep = 0.05f; // map meters between recorded points
+        const int TrailMax = 2000;
+        readonly List<Vector2> trailRos = new List<Vector2>();
+        LineRenderer trail;
+
+        void AddTrailPoint(float x, float y)
+        {
+            var p = new Vector2(x, y);
+            if (trailRos.Count > 0 && (trailRos[trailRos.Count - 1] - p).sqrMagnitude < TrailStep * TrailStep) return;
+            trailRos.Add(p);
+            if (trailRos.Count > TrailMax) trailRos.RemoveRange(0, trailRos.Count - TrailMax);
+            RedrawTrail();
+        }
+
+        void RedrawTrail()
+        {
+            if (trail == null) return;
+            trail.positionCount = trailRos.Count;
+            for (int i = 0; i < trailRos.Count; i++)
+                trail.SetPosition(i, BoardPos(trailRos[i].x, trailRos[i].y) + Vector3.up * 0.002f);
+        }
 
         Vector3 BoardPos(float x, float y) =>
             (RosCoords.ToUnity(x, y) - RosCoords.ToUnity(center.x, center.y)) * scale;
@@ -277,6 +364,8 @@ namespace Understory
             // ROS x -> Unity z (depth), ROS y -> Unity x (width).
             slab.transform.localScale = new Vector3(spanY * scale + 2 * Margin, SlabThickness, spanX * scale + 2 * Margin);
             slab.transform.localPosition = Vector3.down * (SlabThickness / 2f);
+            HalfExtents = new Vector2(slab.transform.localScale.x / 2f, slab.transform.localScale.z / 2f);
+            LayoutChanged?.Invoke();
 
             floor.SetActive(map != null);
             if (map != null)
@@ -289,6 +378,7 @@ namespace Understory
             placed.RemoveAll(e => e.t == null);
             foreach (var (t, ros) in placed) t.localPosition = BoardPos(ros.x, ros.y);
             if (robotPos.HasValue) robot.transform.localPosition = BoardPos(robotPos.Value.x, robotPos.Value.y);
+            RedrawTrail();
 
             status.transform.localPosition = new Vector3(0f, 0.005f, -(spanX * scale / 2f + Margin + 0.01f));
         }
@@ -339,6 +429,19 @@ namespace Understory
             nose.transform.localPosition = new Vector3(0f, 0.007f, 0.016f); // +z = robot forward
             robot.SetActive(false);
 
+            var trailGo = new GameObject("Trail");
+            trailGo.transform.SetParent(mapRoot, false);
+            trail = trailGo.AddComponent<LineRenderer>();
+            trail.useWorldSpace = false; // MapRoot-local, like the markers
+            trail.widthMultiplier = 0.003f;
+            trail.numCornerVertices = 2;
+            trail.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            trail.receiveShadows = false;
+            var trailMat = WorldUI.Tinted(material, null, new Color(1f, 0.75f, 0.2f));
+            owned.Add(trailMat);
+            trail.sharedMaterial = trailMat;
+            trail.positionCount = 0;
+
             status = WorldUI.MakeLabel(root, "", Color.white, 0.025f, TextAnchor.UpperCenter);
             status.transform.localRotation = Quaternion.Euler(60f, 0f, 0f); // lie back toward the viewer
 
@@ -352,7 +455,16 @@ namespace Understory
             int invasive = hub.Pins.Values.Count(p => p.Invasive);
             int total = hub.Pins.Count;
             string state = hub.State == MissionState.Unknown ? "WAITING" : hub.State.ToString();
-            status.text = $"{state}   ·   invasives {invasive}   ·   plants {total}   ·   spots {hub.Bubbles.Count}";
+            string line1 = $"{state}   ·   invasives {invasive}   ·   plants {total}   ·   spots {hub.Bubbles.Count}";
+            string link = rosSource != null ? rosSource.StatusText : "FAKE";
+            string estop = teleop != null && teleop.EStopped ? "   ·   <color=#ff4433>E-STOP</color>" : "";
+            var text = $"{line1}\n<size=36>{link}{estop}</size>";
+            foreach (var provider in StatusProviders)
+            {
+                string extra = provider();
+                if (!string.IsNullOrEmpty(extra)) text += $"\n<size=36>{extra}</size>";
+            }
+            status.text = text;
         }
 
         GameObject Primitive(PrimitiveType type, string name, Color color, Transform parent = null)

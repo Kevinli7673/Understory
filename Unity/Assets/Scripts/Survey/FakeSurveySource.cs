@@ -1,10 +1,8 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using UnityEngine;
-using UnityEngine.Networking;
 
 namespace Understory
 {
@@ -28,19 +26,56 @@ namespace Understory
         [SerializeField] float maxGap = 1.5f;
         [SerializeField] bool playOnStart = true;
         [SerializeField] bool loop;
+        [Tooltip("Robot-free demo: pressing Start survey (mission panel) after a replay finished plays the next " +
+                 "of these without clearing, so the hub archives the previous mission for before/after.")]
+        [SerializeField] string[] nextMissions = { "m2" };
 
         // Matches fake_data/generate.py: 12 frames x 2 s per capture.
         const double CaptureSeconds = 24.0;
 
         Coroutine playback;
+        bool clearOnRun = true;
+        int nextIndex;
+        RosSurveySource ros;
+        MissionPanel panel;
 
         public bool IsPlaying => playback != null;
+        public bool Finished { get; private set; }
 
         void Start()
         {
             if (hub == null) hub = SurveyHub.Instance;
             if (hub == null) { Debug.LogError("[FakeSurveySource] No SurveyHub in scene."); return; }
+            ros = FindAnyObjectByType<RosSurveySource>();
+            panel = FindAnyObjectByType<MissionPanel>();
+            if (panel != null) panel.Pressed += OnPanel;
             if (playOnStart) Play();
+        }
+
+        void OnDestroy()
+        {
+            if (panel != null) panel.Pressed -= OnPanel;
+        }
+
+        /// <summary>Mission panel drives the replay while there's no live ROS data (demo without the robot).</summary>
+        void OnPanel(string keyword)
+        {
+            if (ros != null && ros.IsLive) return; // the real mission manager handles it
+            if (keyword == "start" && !IsPlaying)
+            {
+                if (Finished && nextMissions != null && nextIndex < nextMissions.Length) PlayNextMission();
+                else Play();
+            }
+            else if (keyword == "stop") Stop();
+        }
+
+        /// <summary>Replay the next mission in nextMissions on top of the current one (no clear -> archive).</summary>
+        public void PlayNextMission()
+        {
+            missionId = nextMissions[nextIndex++];
+            Stop();
+            clearOnRun = false;
+            playback = StartCoroutine(Run());
         }
 
         [ContextMenu("Play (restart)")]
@@ -59,29 +94,26 @@ namespace Understory
 
         public string MissionRoot()
         {
-            if (!string.IsNullOrEmpty(missionFolderOverride)) return missionFolderOverride;
-#if UNITY_EDITOR
-            return Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "fake_data", "missions", missionId));
-#else
-            return Application.streamingAssetsPath + "/fake_data/missions/" + missionId;
-#endif
+            return !string.IsNullOrEmpty(missionFolderOverride) ? missionFolderOverride : MissionFiles.Root(missionId);
         }
 
         IEnumerator Run()
         {
+            Finished = false;
             do
             {
-                hub.Clear();
+                if (clearOnRun) hub.Clear();
+                clearOnRun = true;
                 string root = MissionRoot();
                 Debug.Log($"[FakeSurveySource] Replaying {root}");
 
                 string bubblesText = null, pinsText = null, readingsText = null, yaml = null;
                 byte[] pgm = null;
-                yield return LoadText(root, "bubbles.jsonl", s => bubblesText = s);
-                yield return LoadText(root, "pins.jsonl", s => pinsText = s);
-                yield return LoadText(root, "readings.jsonl", s => readingsText = s);
-                yield return LoadText(root, "map.yaml", s => yaml = s);
-                yield return LoadBytes(root, "map.pgm", b => pgm = b);
+                yield return MissionFiles.LoadText(root, "bubbles.jsonl", s => bubblesText = s);
+                yield return MissionFiles.LoadText(root, "pins.jsonl", s => pinsText = s);
+                yield return MissionFiles.LoadText(root, "readings.jsonl", s => readingsText = s);
+                yield return MissionFiles.LoadText(root, "map.yaml", s => yaml = s);
+                yield return MissionFiles.LoadBytes(root, "map.pgm", b => pgm = b);
 
                 if (bubblesText == null)
                 {
@@ -122,6 +154,7 @@ namespace Understory
                 Debug.Log("[FakeSurveySource] Replay finished.");
                 if (loop) yield return new WaitForSeconds(3f);
             } while (loop);
+            Finished = true;
             playback = null;
         }
 
@@ -130,13 +163,13 @@ namespace Understory
             foreach (var f in b.Frames)
             {
                 byte[] jpg = null;
-                yield return LoadBytes(root, $"frames/{b.BubbleId}_{f.Index}.jpg", x => jpg = x);
+                yield return MissionFiles.LoadBytes(root, $"frames/{b.BubbleId}_{f.Index}.jpg", x => jpg = x);
                 if (jpg != null) hub.HandleBubbleImage(f.ImageFrameId(b.BubbleId), jpg);
             }
             if (b.Stitched)
             {
                 byte[] jpg = null;
-                yield return LoadBytes(root, $"frames/{b.BubbleId}_pano.jpg", x => jpg = x);
+                yield return MissionFiles.LoadBytes(root, $"frames/{b.BubbleId}_pano.jpg", x => jpg = x);
                 if (jpg != null) hub.HandleBubbleImage($"{b.BubbleId}/pano", jpg);
             }
         }
@@ -192,26 +225,5 @@ namespace Understory
             // Stable sort: equal timestamps keep insertion order.
             return ev.Select((e, i) => (e, i)).OrderBy(x => x.e.T).ThenBy(x => x.i).Select(x => x.e).ToList();
         }
-
-        // ---- file loading (UnityWebRequest so the same code reads Android StreamingAssets) ----
-
-        static string ToUri(string root, string rel)
-        {
-            string path = root.TrimEnd('/', '\\') + "/" + rel;
-            return path.Contains("://") ? path : new Uri(path).AbsoluteUri;
-        }
-
-        static IEnumerator LoadBytes(string root, string rel, Action<byte[]> done)
-        {
-            using (var req = UnityWebRequest.Get(ToUri(root, rel)))
-            {
-                yield return req.SendWebRequest();
-                if (req.result == UnityWebRequest.Result.Success) done(req.downloadHandler.data);
-                else Debug.LogWarning($"[FakeSurveySource] Missing {rel}: {req.error}");
-            }
-        }
-
-        static IEnumerator LoadText(string root, string rel, Action<string> done) =>
-            LoadBytes(root, rel, b => done(System.Text.Encoding.UTF8.GetString(b)));
     }
 }

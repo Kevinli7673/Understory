@@ -27,6 +27,8 @@ namespace Understory
         public event Action<Reading> ReadingReceived;
         public event Action<MissionState> MissionStateChanged;
         public event Action<MapGrid> MapUpdated;
+        /// <summary>Robot pose in the ROS map frame (x, y meters, yaw radians), e.g. from slam_toolbox /pose.</summary>
+        public event Action<Vector3> RobotPoseUpdated;
         /// <summary>Fires when Clear() wipes state, so views can tear down.</summary>
         public event Action Cleared;
 
@@ -37,6 +39,15 @@ namespace Understory
         public readonly HashSet<string> SpeciesSeen = new HashSet<string>();
         public MapGrid Map { get; private set; }
         public MissionState State { get; private set; } = MissionState.Unknown;
+        /// <summary>Latest (x, y, yaw) from HandleRobotPose; null until one arrives.</summary>
+        public Vector3? RobotPose { get; private set; }
+        /// <summary>mission_id of the data currently in the hub (from the first bubble/pin/reading).</summary>
+        public string MissionId { get; private set; }
+        /// <summary>The mission before this one in this session (archived on a mission_id change), or null.</summary>
+        public string PreviousMissionId { get; private set; }
+        public List<Pin> PreviousMissionPins { get; private set; }
+        /// <summary>Fires when data for a new mission_id starts arriving (after any archive + clear).</summary>
+        public event Action<string> MissionStarted;
 
         void Awake()
         {
@@ -62,6 +73,7 @@ namespace Understory
         public void HandleBubble(Bubble b)
         {
             if (b == null || string.IsNullOrEmpty(b.BubbleId)) return;
+            CheckMission(b.MissionId);
             Bubbles[b.BubbleId] = b;
             Log($"bubble {b.BubbleId} at ({b.X:F2}, {b.Y:F2}) stitched={b.Stitched} frames={b.Frames.Count}");
             BubbleReceived?.Invoke(b);
@@ -88,6 +100,7 @@ namespace Understory
         public void HandlePin(Pin p)
         {
             if (p == null || string.IsNullOrEmpty(p.PinId)) return;
+            CheckMission(p.MissionId);
             bool isNew = !Pins.ContainsKey(p.PinId);
             Pins[p.PinId] = p;
             if (!isNew) return;
@@ -102,6 +115,7 @@ namespace Understory
         public void HandleReading(Reading r)
         {
             if (r == null) return;
+            CheckMission(r.MissionId);
             Readings.Add(r);
             ReadingReceived?.Invoke(r);
         }
@@ -124,6 +138,38 @@ namespace Understory
             MapUpdated?.Invoke(map);
         }
 
+        /// <summary>
+        /// A new mission_id (e.g. the "after" re-survey) archives the current mission's pins in
+        /// PreviousMissionPins and starts clean, keeping the map, mission state and robot pose (same place).
+        /// </summary>
+        void CheckMission(string missionId)
+        {
+            if (string.IsNullOrEmpty(missionId) || missionId == MissionId) return;
+            if (MissionId != null)
+            {
+                PreviousMissionId = MissionId;
+                PreviousMissionPins = new List<Pin>(Pins.Values);
+                Log($"new mission {missionId}; archived {PreviousMissionId} ({PreviousMissionPins.Count} pins)");
+                var map = Map;
+                var state = State;
+                var pose = RobotPose;
+                Clear();
+                if (map != null) HandleMap(map);
+                if (state != MissionState.Unknown) { State = state; MissionStateChanged?.Invoke(state); }
+                if (pose.HasValue) HandleRobotPose(pose.Value.x, pose.Value.y, pose.Value.z);
+            }
+            MissionId = missionId;
+            MissionStarted?.Invoke(missionId);
+        }
+
+        /// <summary>Robot pose, ROS map frame. Not logged (arrives many times a second).</summary>
+        public void HandleRobotPose(float x, float y, float yaw)
+        {
+            var pose = new Vector3(x, y, yaw);
+            RobotPose = pose;
+            RobotPoseUpdated?.Invoke(pose);
+        }
+
         /// <summary>Wipe all state (new mission / restarting fake playback).</summary>
         public void Clear()
         {
@@ -135,6 +181,8 @@ namespace Understory
             SpeciesSeen.Clear();
             Map = null;
             State = MissionState.Unknown;
+            RobotPose = null;
+            MissionId = null; // the archive (PreviousMission*) survives an explicit Clear
             Cleared?.Invoke();
         }
 
