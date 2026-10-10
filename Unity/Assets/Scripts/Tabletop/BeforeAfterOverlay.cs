@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -6,18 +7,21 @@ using UnityEngine.InputSystem;
 namespace Understory
 {
     /// <summary>
-    /// Before/after on the tabletop: loads an earlier mission's pins.jsonl and marks each of its invasives as
-    /// "removed" (green disc) or "still here" (red disc) against the current survey. Same matching rule as the
-    /// dashboard: same label within matchRadius meters. Summary goes on the table's status line,
+    /// Before/after on the tabletop: each invasive from an earlier survey is marked "removed" (green disc) or
+    /// "still here" (red disc) against the current survey. Same matching rule as the dashboard: same label
+    /// within matchRadius meters. Summary on the table's status line,
     /// e.g. "before m1: 7 invasive -> 1 remaining (86% removed)".
-    /// Toggle: the "Compare" button on the mission panel, or V in the editor.
+    ///
+    /// "Before" = the previous mission seen live this session (SurveyHub archives it when a new mission_id
+    /// arrives), else the mission folder beforeMissionId (fake_data / StreamingAssets).
+    /// Toggle: the "Compare before" panel button, or V in the editor.
     /// </summary>
     public class BeforeAfterOverlay : MonoBehaviour
     {
         [SerializeField] SurveyHub hub;
         [SerializeField] TabletopMap table;
         [SerializeField] MissionPanel panel;
-        [Tooltip("Mission folder with the earlier survey (fake_data/missions/<id>, StreamingAssets on the Quest).")]
+        [Tooltip("Fallback 'before' mission folder when no earlier mission was seen live.")]
         [SerializeField] string beforeMissionId = "m1";
         [SerializeField] float matchRadius = 0.5f;
         [SerializeField] bool showOnStart;
@@ -25,12 +29,12 @@ namespace Understory
         static readonly Color Removed = new Color(0.3f, 0.95f, 0.45f);
         static readonly Color Remaining = new Color(1f, 0.25f, 0.2f);
 
-        List<Pin> before;
-        bool loading, shown;
+        List<Pin> before;     // invasives only
+        string beforeLabel;
+        bool loading, shown, dirty;
         Transform layer;
         readonly List<(Transform t, Pin p)> markers = new List<(Transform, Pin)>();
         readonly List<Material> mats = new List<Material>();
-        bool dirty;
 
         public bool Shown => shown;
 
@@ -42,6 +46,7 @@ namespace Understory
             if (hub == null || table == null) { enabled = false; return; }
             hub.PinAdded += OnPinsChanged;
             hub.Cleared += OnCleared;
+            hub.MissionStarted += OnMissionStarted;
             table.LayoutChanged += Place;
             if (panel != null) panel.Pressed += OnPanel;
             table.StatusProviders.Add(Summary);
@@ -50,14 +55,19 @@ namespace Understory
 
         void OnDestroy()
         {
-            if (hub != null) { hub.PinAdded -= OnPinsChanged; hub.Cleared -= OnCleared; }
+            if (hub != null)
+            {
+                hub.PinAdded -= OnPinsChanged;
+                hub.Cleared -= OnCleared;
+                hub.MissionStarted -= OnMissionStarted;
+            }
             if (table != null)
             {
                 table.LayoutChanged -= Place;
                 table.StatusProviders.Remove(Summary);
             }
             if (panel != null) panel.Pressed -= OnPanel;
-            foreach (var m in mats) if (m != null) Destroy(m);
+            DestroyMarkers();
         }
 
         void Update()
@@ -75,25 +85,45 @@ namespace Understory
         public void SetShown(bool on)
         {
             shown = on;
-            if (on && before == null && !loading) StartCoroutine(Load());
+            if (on) ResolveBefore();
             if (layer != null) layer.gameObject.SetActive(on);
-            Debug.Log($"[BeforeAfter] {(on ? "showing" : "hiding")} comparison with {beforeMissionId}");
+            Debug.Log($"[BeforeAfter] {(on ? "showing" : "hiding")} comparison" + (beforeLabel != null ? $" with {beforeLabel}" : ""));
         }
 
-        System.Collections.IEnumerator Load()
+        /// <summary>Live archive wins; otherwise load the fallback folder once.</summary>
+        void ResolveBefore()
+        {
+            if (hub.PreviousMissionPins != null)
+            {
+                string label = $"{hub.PreviousMissionId} (live)";
+                if (beforeLabel != label) Use(hub.PreviousMissionPins, label);
+            }
+            else if (before == null && !loading) StartCoroutine(LoadFallback());
+        }
+
+        void OnMissionStarted(string _)
+        {
+            if (hub.PreviousMissionPins != null) Use(hub.PreviousMissionPins, $"{hub.PreviousMissionId} (live)");
+        }
+
+        IEnumerator LoadFallback()
         {
             loading = true;
             string text = null;
             yield return MissionFiles.LoadText(MissionFiles.Root(beforeMissionId), "pins.jsonl", t => text = t);
-            before = text != null ? SurveyJson.ParseLines<Pin>(text).Where(p => p.Invasive).ToList() : new List<Pin>();
             loading = false;
-            Build();
+            if (hub.PreviousMissionPins != null) yield break; // a live archive showed up meanwhile
+            Use(text != null ? SurveyJson.ParseLines<Pin>(text) : new List<Pin>(), beforeMissionId);
         }
 
-        void Build()
+        void Use(List<Pin> pins, string label)
         {
+            DestroyMarkers();
+            before = pins.Where(p => p.Invasive).ToList();
+            beforeLabel = label;
             if (table.MapRoot == null) return;
-            layer = new GameObject($"Before {beforeMissionId}").transform;
+
+            layer = new GameObject($"Before {label}").transform;
             layer.SetParent(table.MapRoot, false);
             foreach (var p in before)
             {
@@ -112,6 +142,15 @@ namespace Understory
             Recolor();
         }
 
+        void DestroyMarkers()
+        {
+            if (layer != null) Destroy(layer.gameObject);
+            layer = null;
+            markers.Clear();
+            foreach (var m in mats) if (m != null) Destroy(m);
+            mats.Clear();
+        }
+
         void Place()
         {
             foreach (var (t, p) in markers)
@@ -127,20 +166,20 @@ namespace Understory
 
         void Recolor()
         {
-            foreach (var (t, p) in markers)
-                if (t != null) t.GetComponent<MeshRenderer>().sharedMaterial.color = StillThere(p) ? Remaining : Removed;
+            for (int i = 0; i < markers.Count; i++)
+                if (markers[i].t != null) mats[i].color = StillThere(markers[i].p) ? Remaining : Removed;
         }
 
-        /// <summary>Status line text while shown, e.g. "before m1: 7 invasive -> 1 remaining (86% removed)".</summary>
+        /// <summary>Status line while shown, e.g. "before m1: 7 invasive -> 1 remaining (86% removed)".</summary>
         string Summary()
         {
             if (!shown) return null;
-            if (before == null) return $"before {beforeMissionId}: loading...";
+            if (before == null) return "before: loading...";
             int total = before.Count;
-            if (hub.Pins.Count == 0) return $"before {beforeMissionId}: {total} invasive  ·  waiting for this survey";
+            if (hub.Pins.Count == 0) return $"before {beforeLabel}: {total} invasive  ·  waiting for this survey";
             int remaining = before.Count(StillThere);
             int pct = total > 0 ? Mathf.RoundToInt(100f * (total - remaining) / total) : 0;
-            return $"before {beforeMissionId}: {total} invasive  ->  {remaining} remaining  ({pct}% removed)";
+            return $"before {beforeLabel}: {total} invasive  ->  {remaining} remaining  ({pct}% removed)";
         }
     }
 }

@@ -5,7 +5,7 @@ Speaks the same wire protocol as `ros2 run ros_tcp_endpoint default_server_endpo
 and plays a fake_data mission as if the robot were live, plus a tiny robot sim that obeys the Quest:
 
     python tools/quest_mock_endpoint.py                  # mission m1, port 10000
-    python tools/quest_mock_endpoint.py --mission m2 --speed 4
+    python tools/quest_mock_endpoint.py --missions m1,m2 --speed 4   # before, then the re-survey
 
 Publishes (to the Quest):  /mission/state  /map  /pose  /survey/bubbles  /survey/bubble_images
                            /survey/pins  /survey/readings  /camera/image/compressed
@@ -190,27 +190,39 @@ def load_map(folder):
 # ---------------------------------------------------------------- the mock robot + mission
 
 class MockRobot:
-    def __init__(self, mission, speed):
-        self.folder = MISSIONS / mission
-        if not self.folder.exists():
-            raise SystemExit(f'{self.folder} not found. Run: python fake_data/generate.py')
+    def __init__(self, missions, speed):
+        self.missions = missions
+        self.mission_index = -1
         self.speed = speed
-        self.bubbles = load_jsonl(self.folder / 'bubbles.jsonl')
-        self.pins = load_jsonl(self.folder / 'pins.jsonl')
-        self.readings = load_jsonl(self.folder / 'readings.jsonl')
-        self.grid = load_map(self.folder)
         self.state = 'IDLE'
         self.x = self.y = self.yaw = 0.0
         self.estop = False
         self.teleop = (0.0, 0.0, 0.0)
         self.teleop_t = 0.0
         self.lock = threading.Lock()
+        self.load_next_mission()
+
+    def load_next_mission(self):
+        """Advance to the next mission in --missions (e.g. m1 then the m2 re-survey)."""
+        self.mission_index += 1
+        mission = self.missions[self.mission_index]
+        self.folder = MISSIONS / mission
+        if not self.folder.exists():
+            raise SystemExit(f'{self.folder} not found. Run: python fake_data/generate.py')
+        self.bubbles = load_jsonl(self.folder / 'bubbles.jsonl')
+        self.pins = load_jsonl(self.folder / 'pins.jsonl')
+        self.readings = load_jsonl(self.folder / 'readings.jsonl')
+        self.grid = load_map(self.folder)
         self.events = self.build_timeline()
         self.cursor = 0
         self.mission_clock = 0.0
-        self.sent_bubbles = []
+        more = len(self.missions) - self.mission_index - 1
         print(f'[mock] mission {mission}: {len(self.bubbles)} bubbles, {len(self.pins)} pins, '
-              f'{len(self.readings)} readings. Press "Start survey" in the app (or it auto-starts in 3 s).')
+              f'{len(self.readings)} readings' + (f'; {more} more queued (press Start after this one)' if more else ''))
+
+    @property
+    def finished(self):
+        return self.cursor >= len(self.events)
 
     def build_timeline(self):
         ev = [(r['t'], 'reading', r) for r in self.readings]
@@ -229,6 +241,8 @@ class MockRobot:
         word = text.strip().lower()
         with self.lock:
             if word in ('start', 'resume') and not self.estop:
+                if word == 'start' and self.finished and self.mission_index + 1 < len(self.missions):
+                    self.load_next_mission()
                 self.state = 'SURVEYING'
             elif word == 'stop':
                 self.state = 'IDLE'
@@ -300,7 +314,6 @@ class MockRobot:
             return [frame('/survey/readings', msg_string(json.dumps(data)))]
         if kind == 'bubble':
             self.state = 'CAPTURING'
-            self.sent_bubbles.append(data)
             out = []
             for f in data['frames']:
                 jpg = self.folder / 'frames' / f"{data['bubble_id']}_{f['index']}.jpg"
@@ -368,7 +381,7 @@ def serve_client(conn, addr, robot, args):
     try:
         while alive[0]:
             now = time.time()
-            if robot.state == 'IDLE' and robot.cursor == 0 and args.autostart and now - start > 3:
+            if robot.state == 'IDLE' and robot.mission_index == 0 and robot.cursor == 0 and args.autostart and now - start > 3:
                 robot.on_voice('start')
             for data in robot.step(now - last):
                 send(data)
@@ -397,7 +410,8 @@ def serve_client(conn, addr, robot, args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--mission', default='m1')
+    ap.add_argument('--missions', default='m1',
+                    help='comma-separated, played in order; Start after one finishes begins the next (e.g. m1,m2)')
     ap.add_argument('--port', type=int, default=10000)
     ap.add_argument('--speed', type=float, default=3.0, help='mission replay speed vs. recorded time')
     ap.add_argument('--camera-fps', type=float, default=5.0)
@@ -415,7 +429,7 @@ def main():
         conn, addr = srv.accept()
         conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         # Fresh mission per connection, so reconnecting the app restarts the demo.
-        robot = MockRobot(args.mission, args.speed)
+        robot = MockRobot([m.strip() for m in args.missions.split(',') if m.strip()], args.speed)
         serve_client(conn, addr, robot, args)
 
 
