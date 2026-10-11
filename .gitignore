@@ -27,3 +27,4 @@ Unity/Assets/StreamingAssets/splat.meta
 Unity/*_BackUpThisFolder_ButDontShipItWithYourGame/
 Unity/*_BurstDebugInformation_DoNotShip/
 Unity/.utmp/
+.venv/

@@ -1,0 +1,11 @@
+streamlit>=1.50
+psycopg[binary]>=3.1
+pandas
+numpy
+pillow
+pyyaml
+plotly
+huggingface_hub
+python-dotenv
+pytest
+# optional, for sync.py --embed: open_clip_torch torch
