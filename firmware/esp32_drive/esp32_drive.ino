@@ -3,6 +3,7 @@
 // Pi -> ESP32 (USB serial, 115200, one command per line), sent by pi/scripts/esp32_bridge.py from /cmd_vel:
 //   C <vx> <vy> <wz>     body velocity, ROS axes: vx forward m/s, vy left m/s, wz counter-clockwise rad/s
 //   S                    stop now
+//   W <fl> <fr> <rl> <rr>  per-wheel speed trim (0.3..2.0), sent by the bridge when it connects
 //   T <0-3>              wiring test: spin one wheel forward briefly (0 FL, 1 FR, 2 RL, 3 RR)
 // ESP32 -> Pi:
 //   {"temp_c": 24.1, ...}  sensor JSON line -> /sensors (missing sensors are omitted, never null)
@@ -36,6 +37,9 @@ const uint8_t SHIELD_ADDR = 0x60;      // default address (solder jumpers change
 const uint8_t WHEEL_PORT[4] = {2, 3, 1, 4};
 // Flip a wheel to -1 if it spins backwards when the robot is told to drive forward (C 0.1 0 0).
 const int8_t WHEEL_DIR[4] = {1, -1, -1, 1};
+// Per-wheel speed multiplier to even out weak motors (FL, FR, RL, RR). Set at runtime by the bridge with
+// "W fl fr rl rr" (esp32_bridge.py --trim), so tuning doesn't need a reflash; these are the boot defaults.
+float WHEEL_TRIM[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 const float MAX_WHEEL_SPEED = 0.35f;   // m/s a wheel rim reaches at full PWM (calibrate: drive 1 m, time it)
 const float K = 0.20f;                 // half wheelbase + half track width, meters (rotation lever arm)
@@ -79,7 +83,7 @@ void writeWheel(int i, int pwm, uint8_t run, bool force) {
 }
 
 void setWheel(int i, float speed) {           // speed in m/s, signed
-  float s = speed * WHEEL_DIR[i];
+  float s = speed * WHEEL_DIR[i] * WHEEL_TRIM[i];
   int pwm = (int)(fabsf(s) / MAX_WHEEL_SPEED * 255.0f * PWM_CAP + 0.5f);
   if (pwm == 0) { writeWheel(i, 0, RELEASE, false); return; }
   if (pwm < PWM_MIN) pwm = PWM_MIN;
@@ -120,6 +124,19 @@ void drive(float vx, float vy, float wz) {
 bool handleLine(char *s) {
   while (*s == ' ') s++;
   if (s[0] == 'S' && (s[1] == 0 || s[1] == ' ')) { stopAll(true); lastCmdMs = millis(); return true; }
+  if (s[0] == 'W') {   // per-wheel trim
+    char *p = s + 1, *end;
+    float v[4];
+    for (int k = 0; k < 4; k++) {
+      v[k] = strtof(p, &end);
+      if (end == p || !isfinite(v[k]) || v[k] < 0.3f || v[k] > 2.0f) return false;
+      p = end;
+    }
+    bool changed = false;
+    for (int k = 0; k < 4; k++) { changed |= WHEEL_TRIM[k] != v[k]; WHEEL_TRIM[k] = v[k]; }
+    if (changed) Serial.printf("# trim FL=%.2f FR=%.2f RL=%.2f RR=%.2f\n", v[0], v[1], v[2], v[3]);
+    return true;
+  }
   if (s[0] == 'T') {   // wiring test: "T 0".."T 3" spins one wheel "forward" for ~0.3 s (watchdog stops it)
     int i = atoi(s + 1);
     if (i < 0 || i > 3) return false;

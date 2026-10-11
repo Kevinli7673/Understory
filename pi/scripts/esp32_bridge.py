@@ -4,6 +4,7 @@
 Run inside the container (~/scout_shell.sh on the host first), ESP32 plugged into the Pi by USB:
     python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py
     python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --port /dev/ttyUSB1
+    python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --trim 0.8,1.15,1.15,0.8   # even out wheels
 
 Firmware and line protocol: firmware/esp32_drive/esp32_drive.ino
     to ESP32:   "C <vx> <vy> <wz>\\n"  (ROS axes, m/s and rad/s), sent for every /cmd_vel message
@@ -49,9 +50,10 @@ def find_port():
 
 
 class Esp32Bridge(Node):
-    def __init__(self, port, baud, hold):
+    def __init__(self, port, baud, hold, trim):
         super().__init__('esp32_bridge')
         self.port_arg, self.baud, self.hold = port, baud, hold
+        self.trim_line = 'W ' + ' '.join(f'{t:.3f}' for t in trim) + '\n'   # per-wheel speed trim FL FR RL RR
         self.ser = None
         self.buf = b''
         self.last_status = ''
@@ -69,6 +71,7 @@ class Esp32Bridge(Node):
 
     def ensure_open(self):
         if self.ser is not None:
+            self.write(self.trim_line)   # every 2 s, so an ESP32 reset gets the trim back
             return
         port = self.port_arg or find_port()
         if not port:
@@ -76,7 +79,8 @@ class Esp32Bridge(Node):
             return
         try:
             self.ser = serial.Serial(port, self.baud, timeout=0, write_timeout=0.05)
-            self.get_logger().info(f'ESP32 on {port} @ {self.baud}')
+            self.get_logger().info(f'ESP32 on {port} @ {self.baud}, trim {self.trim_line.strip()}')
+            self.write(self.trim_line)
         except (serial.SerialException, OSError) as e:
             self.get_logger().warn(f'cannot open {port}: {e}', throttle_duration_sec=10.0)
             self.ser = None
@@ -164,9 +168,14 @@ def main():
     ap.add_argument('--baud', type=int, default=115200)
     ap.add_argument('--hold', type=float, default=0.5,
                     help='re-send the latest /cmd_vel while it is younger than this (s); bridges Wi-Fi gaps')
+    ap.add_argument('--trim', default='1,1,1,1',
+                    help='per-wheel speed multipliers FL,FR,RL,RR (0.3-2.0), e.g. 0.8,1.15,1.15,0.8')
     args = ap.parse_args()
+    trim = [float(t) for t in args.trim.split(',')]
+    if len(trim) != 4 or not all(0.3 <= t <= 2.0 for t in trim):
+        ap.error('--trim needs 4 numbers between 0.3 and 2.0')
     rclpy.init()
-    node = Esp32Bridge(args.port, args.baud, args.hold)
+    node = Esp32Bridge(args.port, args.baud, args.hold, trim)
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):  # Ctrl+C, or pkill / scout_down.sh
