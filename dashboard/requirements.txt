@@ -8,4 +8,6 @@ plotly
 huggingface_hub
 python-dotenv
 pytest
+aiohttp          # live_relay.py
+websockets       # fake_live.py
 # optional, for sync.py --embed: open_clip_torch torch
