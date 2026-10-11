@@ -7,8 +7,12 @@
 //   {"temp_c": 24.1, ...}  sensor JSON line -> /sensors (missing sensors are omitted, never null)
 //   # text                 status / debug (logged by the bridge, not published)
 //
-// Safety: motors stop if no command arrives for WATCHDOG_MS (AGENTS.md: 300 ms). The e-stop itself is
-// handled upstream by twist_mux (it stops sending /cmd_vel), so the watchdog is what actually stops the wheels.
+// Safety:
+//   - Motors stop if no command arrives for WATCHDOG_MS (AGENTS.md: 300 ms). The bridge also sends "S" on e-stop.
+//   - While stopped, "stop" is re-sent to every motor every IDLE_REFRESH_MS: the shield's PWM chip keeps its last
+//     output on its own, so a single lost I2C write would otherwise leave a wheel spinning with nothing to fix it.
+//   - Every STATUS_MS the shield is pinged on I2C; failures are reported ("# ERROR: I2C ...") and counted.
+//   - The boot line reports why the ESP32 last reset (e.g. BROWNOUT when the motors drag the supply down).
 //
 // Test without the Pi: Arduino IDE Serial Monitor at 115200, "Newline" line ending, type  C 0.1 0 0
 // (forward, keeps going while you re-send it within 300 ms, so expect a short bump per line).
@@ -17,6 +21,7 @@
 
 #include <Wire.h>
 #include <Adafruit_MotorShield.h>
+#include <esp_system.h>
 
 // ------------------------------------------------------------------------------------------------
 // CONFIG: everything hardware-specific is here.
@@ -33,7 +38,8 @@ const float K = 0.20f;                 // half wheelbase + half track width, met
 const float PWM_CAP = 0.85f;           // 6 V motors on ~7.2 V (6x AA): cap at 85% (AGENTS.md)
 const uint8_t PWM_MIN = 45;            // below this the motors just hum; nudge small commands up to it
 const uint32_t WATCHDOG_MS = 300;      // stop if no command for this long
-const uint32_t STATUS_MS = 2000;       // "# ..." status line period
+const uint32_t IDLE_REFRESH_MS = 100;  // while stopped, re-send "stop" to every motor this often
+const uint32_t STATUS_MS = 2000;       // "# ..." status line period (also pings the shield)
 const uint32_t SENSOR_MS = 1000;       // sensor JSON period (only if readSensors() fills anything)
 // ------------------------------------------------------------------------------------------------
 
@@ -41,12 +47,12 @@ Adafruit_MotorShield shield(SHIELD_ADDR);
 Adafruit_DCMotor *wheels[4];
 bool shieldOk = false;
 
-uint32_t lastCmdMs = 0, lastStatusMs = 0, lastSensorMs = 0;
+uint32_t lastCmdMs = 0, lastStatusMs = 0, lastSensorMs = 0, lastRefreshMs = 0;
 bool moving = false;
 float cmdVx = 0, cmdVy = 0, cmdWz = 0;
 char line[96];
 uint8_t lineLen = 0;
-uint32_t commands = 0;
+uint32_t commands = 0, i2cErrors = 0;
 
 void setWheel(int i, float speed) {           // speed in m/s, signed
   if (!shieldOk) return;
@@ -60,7 +66,7 @@ void setWheel(int i, float speed) {           // speed in m/s, signed
 }
 
 void stopAll() {
-  if (shieldOk) for (int i = 0; i < 4; i++) wheels[i]->run(RELEASE);
+  if (shieldOk) for (int i = 0; i < 4; i++) { wheels[i]->setSpeed(0); wheels[i]->run(RELEASE); }
   moving = false;
   cmdVx = cmdVy = cmdWz = 0;
 }
@@ -88,7 +94,7 @@ void drive(float vx, float vy, float wz) {
   cmdVx = vx; cmdVy = vy; cmdWz = wz;
 }
 
-// Parse "C vx vy wz" / "S". Returns false for anything else (reported once as "# bad: ...").
+// Parse "C vx vy wz" / "S". Returns false for anything else (reported as "# bad: ...").
 bool handleLine(char *s) {
   while (*s == ' ') s++;
   if (s[0] == 'S' && (s[1] == 0 || s[1] == ' ')) { stopAll(); lastCmdMs = millis(); return true; }
@@ -114,17 +120,55 @@ bool readSensors(String &out) {
   return false;  // no sensors yet; pi/scripts/fake_sensors.py stands in
 }
 
+const char *resetReason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON: return "power-on";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (supply dipped: motors sharing the ESP32's supply or ground?)";
+    case ESP_RST_PANIC: return "crash (panic)";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT: return "watchdog (program hung)";
+    case ESP_RST_SW: return "software reset";
+    case ESP_RST_EXT: return "reset pin";
+    default: return "other";
+  }
+}
+
+bool startShield() {
+  if (!shield.begin(1600, &Wire)) return false;
+  for (int i = 0; i < 4; i++) wheels[i] = shield.getMotor(WHEEL_PORT[i]);
+  shieldOk = true;
+  stopAll();
+  return true;
+}
+
+// Is the shield still answering on I2C? Report and count failures; restart it (stopped) when it answers again.
+void checkShield() {
+  Wire.beginTransmission(SHIELD_ADDR);
+  uint8_t err = Wire.endTransmission();
+  if (err == 0) {
+    if (!shieldOk && startShield()) Serial.println("# motor shield answering again, motors stopped");
+    return;
+  }
+  i2cErrors++;
+  shieldOk = false;
+  Serial.print("# ERROR: I2C to motor shield failed (code ");
+  Serial.print(err);
+  Serial.print(", ");
+  Serial.print(i2cErrors);
+  Serial.println(" so far): loose SDA/SCL/GND wire, or motor noise on the I2C lines");
+}
+
 void setup() {
   Serial.begin(115200);
   Wire.begin();
-  shieldOk = shield.begin(1600, &Wire);
-  if (shieldOk) {
-    for (int i = 0; i < 4; i++) wheels[i] = shield.getMotor(WHEEL_PORT[i]);
-    stopAll();
-    Serial.println("# understory drive ready (motor shield ok)");
+  Wire.setTimeOut(20);   // a glitchy I2C line can't freeze the loop (and with it the watchdog)
+  if (startShield()) {
+    Serial.print("# understory drive ready (motor shield ok), last reset: ");
   } else {
-    Serial.println("# ERROR: motor shield not found on I2C (check SDA/SCL wiring, power, address 0x60)");
+    Serial.print("# ERROR: motor shield not found on I2C (check SDA/SCL wiring, power, address 0x60), last reset: ");
   }
+  Serial.println(resetReason());
 }
 
 void loop() {
@@ -152,6 +196,12 @@ void loop() {
     Serial.println("# watchdog: no command for 300 ms, motors stopped");
   }
 
+  // While stopped, keep re-sending "stop" so a lost I2C write can't leave a wheel running.
+  if (!moving && now - lastRefreshMs >= IDLE_REFRESH_MS) {
+    lastRefreshMs = now;
+    stopAll();
+  }
+
   if (now - lastSensorMs >= SENSOR_MS) {
     lastSensorMs = now;
     String fields;
@@ -160,8 +210,9 @@ void loop() {
 
   if (now - lastStatusMs >= STATUS_MS) {
     lastStatusMs = now;
-    Serial.printf("# status shield=%s moving=%d cmd=(%.2f %.2f %.2f) cmds=%lu age=%lums\n",
+    checkShield();
+    Serial.printf("# status shield=%s moving=%d cmd=(%.2f %.2f %.2f) cmds=%lu age=%lums i2c_errors=%lu\n",
                   shieldOk ? "ok" : "MISSING", moving, cmdVx, cmdVy, cmdWz,
-                  (unsigned long)commands, (unsigned long)(now - lastCmdMs));
+                  (unsigned long)commands, (unsigned long)(now - lastCmdMs), (unsigned long)i2cErrors);
   }
 }
