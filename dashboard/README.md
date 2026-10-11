@@ -9,7 +9,13 @@ python3 -m venv ~/.venvs/understory-dashboard
 # from the repo root, so .streamlit/config.toml (theme, fonts) is used
 ~/.venvs/understory-dashboard/bin/streamlit run dashboard/app.py      # http://localhost:8501
 ~/.venvs/understory-dashboard/bin/python -m pytest dashboard/tests -q
+dashboard/run.sh                # dashboard :8501 + live relay :8770 + LiDAR bridge, for the whole network (uses dashboard/.venv)
+dashboard/run.sh --stop
 ```
+
+On the Jetson the venv is `dashboard/.venv` (git-ignored). If `python3 -m venv` fails there with "ensurepip is not
+available" (no sudo): `python3 -m venv --without-pip dashboard/.venv`, download `https://bootstrap.pypa.io/get-pip.py`,
+run it with `dashboard/.venv/bin/python`, then `dashboard/.venv/bin/pip install -r dashboard/requirements.txt`.
 
 Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS until someone uses the
 small sidebar Dark / Light button, which pins it for the whole server and fades it in place),
@@ -22,6 +28,10 @@ in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
   `fake_data/missions/`. This is the "venue internet" fallback: keep the pre-synced Saturday-night
   folders on the laptop.
 - **Neon**: shown when `DATABASE_URL` is in `.env`. If Neon can't be reached the app drops back to the folders.
+- **Hugging Face**: shown when `HF_DATASET_REPO` is in `.env` (`HF_TOKEN` too if the dataset is private). The app
+  downloads the dataset into `~/.cache/understory/hf_missions/` (`HF_MISSIONS_CACHE` to change it) and reads it like
+  mission folders, so every tab works without Neon. Only changed files are fetched again ("Download again" in the
+  sidebar, or after 5 minutes). With no internet it shows the last download.
 
 ## Page
 
@@ -36,6 +46,9 @@ Sensor readings are still synced to Neon (`readings`) but not shown.
 Quest (HeadsetStreamer.cs) --ws JPEG--> live_relay.py :8770 --ws--> dashboard browser (Headset view)
 Jetson/Pi (scan_bridge.py) --HTTP POST /scan--> live_relay.py <--GET /scan-- dashboard (Survey map, 1 Hz)
 ```
+
+On the Jetson `dashboard/run.sh` starts all of it: the dashboard, the relay, and `scan_bridge.py` inside the `scout`
+ROS container. The Quest then needs the Jetson's address in `dashboard_ip.txt` (last block below). By hand, or on a laptop:
 
 ```bash
 # laptop, next to the dashboard
@@ -63,12 +76,15 @@ adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/
 ```bash
 ~/.venvs/understory-dashboard/bin/python dashboard/sync.py missions/m1 missions/m2            # HF + Neon
 ~/.venvs/understory-dashboard/bin/python dashboard/sync.py missions/m1 --no-hf                # Neon only
+~/.venvs/understory-dashboard/bin/python dashboard/sync.py missions/m1                        # no DATABASE_URL in .env: HF only
 ~/.venvs/understory-dashboard/bin/python dashboard/sync.py fake_data/missions/m1 --dry-run    # just read and count
 ```
 
 `.env` (never committed): `DATABASE_URL=postgresql://...neon.tech/...?sslmode=require`, `HF_TOKEN=hf_...`,
 `HF_DATASET_REPO=<org>/understory-missions`.
 
+- The dataset is created private unless `--public` is given (frames show whoever stood near the robot). The image
+  URLs written to Neon only open in a browser for a public dataset; the Hugging Face data source works either way.
 - Creates the schema (`schema.sql`: `missions`, `bubbles`, `pins` with `embedding vector(512)`, `readings`)
   on every run; all writes are upserts, so re-running is safe.
 - Uploads `frames/`, `crops/`, `crops_deep/`, the JSONL files, `map.pgm`/`map.yaml`, plus a `map.png` that

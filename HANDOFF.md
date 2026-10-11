@@ -1,6 +1,6 @@
 # Understory handoff: Pi + Jetson (perception, bringup, AI)
 
-Written Sat Oct 10 2026, last updated about 8:40 PM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
+Written Sat Oct 10 2026, last updated Sun Oct 11 about 3:30 AM EDT, on the Jetson. **Submission is Sun Oct 11, 9:30 AM EDT.**
 
 This file is for Alvaro (perception lead) and for any coding agent picking the work up on either the
 Raspberry Pi or the Jetson Orin Nano. It covers what exists, what was tested and how, how to run it,
@@ -33,7 +33,10 @@ follow the rules in section 12.
 | NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
 | Mission logger (`logger_node`) | Works with fake data; live pins and crops written Sat night | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). Live: 12 pins and crops in `missions/m1`, all false alarms, no bubble captured yet (session 10, continued) |
 | AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
-| Dashboard, Neon sync | Not in the repo | other owners |
+| Dashboard (one-page design with the live headset view and live LiDAR) | Runs on the Jetson, `http://<Jetson IP>:8501`; `dashboard/run.sh` starts it, the live relay (`:8770`) and the LiDAR bridge | Sun 3:25 AM: 13 tests pass; folder and Hugging Face sources render; real LiDAR scans reach the page (session 12) |
+| Headset view on the dashboard | **Relay works with test frames. The Quest has not sent a frame** | 24 test JPEGs through the WebSocket over the hotspot, all received. Needs the Quest steps in section 8a |
+| Hugging Face dataset `a1vcm/understory-missions` (private) | Holds the two **fake** missions m1 and m2 | uploaded Sat 11:40 PM; downloaded by the dashboard Sun 1:40 AM |
+| Neon sync | **Not run**: no `DATABASE_URL` in `.env` | |
 
 The short version: **the full perception chain now runs on the Pi alone, slowly.** A plant photo held
 in front of the camera becomes a pin about 12 to 15 seconds later. The Jetson's job is to run the same
@@ -369,6 +372,48 @@ Things to tell Kevin:
 - Ignore test data from Saturday morning: bubble `m1-b01` and pins `m1-p01` to `m1-p15` were
   published around 11:47 AM from dummy backends.
 
+## 8a. Headset view on the dashboard (Kevin): what to do on the Quest
+
+The dashboard's top panel shows what the headset wearer sees. The Quest app sends JPEG frames over a WebSocket to a
+relay (`dashboard/live_relay.py`), and every browser that has the dashboard open reads them from the relay.
+
+```
+Quest (HeadsetStreamer.cs) --ws JPEG--> relay on the Jetson, port 8770 --ws--> dashboard in a browser
+```
+
+The Jetson side is running (`dashboard/run.sh`, Sun 3:25 AM). The relay is at **`172.20.10.4:8770`**. Three steps on your side:
+
+1. **Get the code and build.** `git pull` on `main` once PR #15 is merged, or check out `hf-hub-handoff` now. The
+   script is `Unity/Assets/Scripts/Util/HeadsetStreamer.cs`. It adds itself at startup; nothing to place in the scene.
+   **It has no `.meta` file in the repo**: open the project in Unity once so it writes one, and commit it. Compile check
+   without Unity in focus: `bash tools/check_unity_scripts.sh`. Then build and install the APK as usual.
+2. **Tell the app where the relay is.** With the Quest on USB:
+   ```bash
+   echo 172.20.10.4 > dashboard_ip.txt
+   adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/
+   ```
+   This file is separate from `ros_ip.txt` (the robot, `172.20.10.3`). It survives app updates; push it again only if
+   the Jetson's address changes (`hostname -I` on the Jetson). A full `ws://host:port/path` in the file also works.
+   Without the file the streamer stays off and the app behaves as before.
+3. **Restart the app, then check.**
+   - `adb logcat -s Unity | grep HeadsetStreamer` should print `streaming to ws://172.20.10.4:8770/ws/headset/pub`.
+     `off: no dashboard_ip.txt in ...` means step 2 did not land in that folder.
+   - `http://172.20.10.4:8770/health` in any browser: `headset_publishers` should be 1 and `frame_age` under 1.
+   - `http://172.20.10.4:8770/headset.jpg` shows the newest frame by itself.
+   - `http://172.20.10.4:8501`: the top panel changes from "Waiting for the headset" to the picture with "live · 8 fps".
+
+Things to know:
+- The stream is 640x360, 8 frames a second, JPEG quality 60 (fields on the component). Passthrough is not in it,
+  because the headset's system adds passthrough after the app renders: virtual content shows on a dark background.
+- If the picture is upside down, restart the dashboard with `LIVE_FLIP=1 dashboard/run.sh` (after `dashboard/run.sh --stop`).
+- The Quest, the Jetson and the viewing laptop must be on the same hotspot. The browser opens
+  `ws://<the dashboard's host>:8770/ws/headset` itself.
+- **Not tested with a headset.** Only the relay was tested, with frames sent from a script. The capture code in
+  `HeadsetStreamer.cs` (mizbahh, Sun 3 AM) has not run on a Quest as far as this file knows.
+- To try the panel with no headset: `dashboard/.venv/bin/python dashboard/fake_live.py` on the Jetson. **It also posts
+  fake LiDAR scans**, so stop the real bridge first (`docker exec scout pkill -f scan_bridge.py`) and run
+  `dashboard/run.sh` again afterwards.
+
 ## 9. What is left, in order
 
 1. **Jetson steps 0 to 2** (section 7). Settles the two-machine question, the largest untested risk.
@@ -653,6 +698,44 @@ installed on it."*
 - For a dry run of the AMD steps before a real mission exists, `fake_data/missions/m1` has 64 frames, a map and bubbles.
 - **Mapping was stuck from 10:14 to 10:55 PM and nothing reported it.** `/pose` had stopped and `tf2_echo map base_link` found no transform. slam_toolbox was running and using CPU, and `map -> odom` was still on `/tf` 30 times a second, but with a time stamp 37 minutes old (measured with `~/fetch_ws/logs/tfcheck.py`), so every lookup failed. `/scan` was 9.5 Hz and `odom -> base_link` was current. Cause not found; the old log is `~/fetch_ws/logs/nav_until_2255.log`. Fix: `docker exec scout pkill -INT -f 'ros2 launch'`, then `~/start_understory.sh` (the map starts again from empty). After it: `map -> odom` under 1.2 s old, `/pose` 10.0 Hz, no node name twice. **If the robot marker in the Quest freezes while the robot moves, do this.**
 - 10:47 PM: the ESP32 is no longer on the Pi's USB (only the LiDAR is listed) and the Quest is not connected.
+- **Hugging Face, 11:30 to 11:55 PM.** The token (account `a1vcm`, write) and `HF_DATASET_REPO=a1vcm/understory-missions` are in `.env` at the repo root on the Jetson (not committed). New `amd/hub.py` (`upload`, `pull`, `push`) and `amd/run_all.sh <id>`: the W7900 box pulls a mission from the dataset, runs the deep pass and the splat, and pushes the results back, so it needs no route to the Jetson. Done for real from the Jetson's `scout-ai` container: `upload` of `fake_data/missions/m1` and `m2` (155 files, dataset created **private**) and `pull m1` into an empty folder (64 frames, map, bubbles, pins). **`push` and `run_all.sh` have not run**: they need deep-pass output, which needs the box. `--public` on the first upload, or the dataset's settings page, makes it public; real frames show whoever stood near the robot.
+- **The AI node was killed twice by the memory guard, 10:40 and 11:17 PM, both times right after Firefox was opened on the Jetson's desktop.** `~/fetch_ws/logs/mem_watch.log`: `GUARD: avail 687MB < 700MB, killing AI nodes`. Nothing restarts it, and it is **still down at midnight**. With Firefox open there is not enough memory for it (about 2.6 GB). Close the browser, then `~/start_understory.sh`.
+- **11:35 to 11:50 PM the hotspot was unusable:** ping to the phone 2 to 4 s with 25 to 60% loss, and no `/scan` or camera from the Pi. It recovered by itself (9 ms, 0% loss at 11:52 PM). The Hugging Face upload and the browser on the Jetson were using the same hotspot at the time. Do not upload or browse over the robot's hotspot during the demo.
+- **The Pi was rebooted at 11:39 PM (during that outage) and came up with its own mapping stack** (`scout_nav.launch.py`: slam_toolbox, Nav2, mission manager, twist_mux, logger, `pose_from_tf`), so at 11:55 PM every one of those names was on the network twice and two twist_mux nodes fed the ESP32 bridge. **The Jetson's copy was stopped at 11:57 PM**, because the Pi's was the newer one and somebody may be working there. After that: no name twice, one `/cmd_vel` publisher, `/mission/state` `IDLE`, `/pose` 9.5 Hz. **Mapping now runs on the Pi and missions are logged on the Pi** (`~/fetch_ws/missions` there). To move mapping back to the Jetson: on the Pi `~/scout_down.sh --keep && ~/scout_up.sh`, then on the Jetson `~/start_understory.sh`. Whisper was not running on the Pi after its reboot.
+- **The Pi's GitHub login stopped working at about 11:50 PM** (`gh auth status`: "The token in hosts.yml is invalid"), so nothing can be pushed from the Jetson or the Pi until someone runs `gh auth login` on the Pi. Branch `hf-hub-handoff` is in the Pi's clone and on the Jetson, not on GitHub.
+
+**Session 12, Sun 1:30 to 2:00 AM, on the Jetson.** *"The Pi is connected again, continue on and implement the dashboard and run everything and implement the Hugging Face."* The Jetson had rebooted at 1:21 AM. The Pi is at `172.20.10.3` on "iPhone (2)", had restarted its own `scout_up.sh --nav` stack at 1:30 AM with the ESP32 and LiDAR plugged in and the Quest connected, and has staged, uncommitted work on `pi-session-11` (bridge `--trim`/`--strafe-fix`, `slam_toolbox_pi.yaml`). **Mapping, Nav2, the mission manager, panorama and the logger stay on the Pi.** Nothing in the Pi's clone was touched.
+- **Dashboard runs on the Jetson:** `dashboard/run.sh` (new) serves it at `http://172.20.10.4:8501` for any laptop on the hotspot; `--stop` stops it; log in `~/fetch_ws/logs/dashboard.log`. It is not started by `~/start_understory.sh`. `dashboard/.venv` was built without sudo (`dashboard/README.md` has the steps). It uses about 150 MB. **Open it from a laptop, not from a browser on the Jetson** (the memory guard, session 10).
+- **Dashboard, new data source "Hugging Face"** (sidebar, shown when `HF_DATASET_REPO` is in `.env`): downloads the dataset to `~/.cache/understory/hf_missions/` and reads it like mission folders, so all four tabs work with no Neon. Done for real at 1:40 AM against the private dataset: 155 files, 71 s over the hotspot the first time, then m1 and m2 listed and "7 invasive plants found -> 1 remaining". With no internet it shows the last download. 2 new tests (8 pass).
+- **`dashboard/sync.py` without `DATABASE_URL` now uploads to Hugging Face only** instead of exiting, and creates the dataset private unless `--public` (it used to create it public). Tested with a fake uploader only; the real upload path is the same call `amd/hub.py upload` made on Saturday.
+- **What the dashboard shows by default** is `~/fetch_ws/missions` on the Jetson: `m1` (one bubble taken at 12:45 AM from a table top, 2 pins that are not plants) and `m1_false_alarms_sat`. **Neither is a real survey.** For the fake before/after demo choose "Hugging Face", or start with `MISSIONS_DIR=fake_data/missions dashboard/run.sh`.
+- **Missions are logged on the Pi while the Pi maps.** After a real survey: `rsync -a a1vcm@172.20.10.3:fetch_ws/missions/ ~/fetch_ws/missions/` on the Jetson (move the Jetson's test `m1` away first), then `dashboard/.venv/bin/python dashboard/sync.py ~/fetch_ws/missions/<id>`. **The dataset's `m1/` and `m2/` are the fake missions; a real `m1` uploaded on top would mix with them.** Delete those two folders on the dataset page first, or record the real missions under other ids.
+- **The hotspot is on 2.4 GHz (channel 11) and cannot carry the camera to the Jetson.** With the Jetson's AI subscribed to `/camera/image/compressed`, ping to the Pi went to 0.2 to 2.2 s, the camera arrived at 2 Hz, and `/pose` and `/mission/state` did not arrive; 20 s after the AI was stopped ping was 25 ms. One trial each way. On Saturday at 10 PM the same phone carried 15 Hz.
+- **Workaround, running now: `pi/scripts/camera_throttle.py`** (new) on the Pi republishes 3 frames a second on `/camera/image/throttled`, and `CAMERA_TOPIC=/camera/image/throttled ~/start_understory.sh` makes the detector, species and localizer nodes read that topic (`scout_ai_up.sh`, new variable). Measured after: ping 45 ms, `/scan` 10.8 Hz, `/pose` 10.4 Hz, `/detections` 1.7 Hz, 2.8 GB available, no node name twice. The Quest and the panorama node still use the full-rate topic. **The throttle was started by hand from a copy in the Pi's `~/fetch_ws/logs/` and is gone after a Pi restart**: `docker exec -d scout bash -c "source /opt/ros/jazzy/setup.bash && python3 /fetch_ws/logs/camera_throttle.py > /fetch_ws/logs/camera_throttle.log 2>&1"`. **Better fix: put the phone's hotspot on 5 GHz** ("Maximize Compatibility" off), reconnect both machines, and run `~/start_understory.sh` without `CAMERA_TOPIC`.
+- At 1:32 AM the Jetson saw none of the Pi's nodes for about three minutes although ping, UDP unicast and multicast worked both ways and the Pi's discovery packets were arriving; it then saw all 41 without any change. Cause not found.
+- Not tested: a plant in front of the camera with the 3 Hz feed; a pin written by the Pi's logger from the Jetson's localizer; Whisper with a human voice (the node was started on the Pi at 1:32 AM).
+- The Pi's GitHub login works again (checked 1:58 AM). Branch `hf-hub-handoff` was pushed to GitHub through the Pi; **it is not merged into `main`** and has no pull request yet.
+
+**Session 12, continued, Sun 2:05 to 2:35 AM.** *"I turned off Maximize Compatibility ... I restarted the hotspot, restart both sides."*
+- **The hotspot is on 5 GHz now** (channel 149; it only changed after the hotspot was switched off and on). Same addresses: Pi `.3`, Jetson `.4`. Ping to the Pi 4 to 9 ms with the Jetson's AI reading the full camera stream, which arrives at 14.9 Hz. `CAMERA_TOPIC` and `camera_throttle.py` are no longer in use.
+- **The LiDAR does not stay up on the Pi: USB over-current.** Every start of the Pi's stack (four tries, 2:20 to 2:29 AM, and once starting the LiDAR driver alone with the camera already running) is followed within seconds by `usb usbN-portN: over-current change` in `dmesg`; the Pi cuts power to all USB ports, the LiDAR, camera and ESP32 re-enumerate, the camera node respawns and the bridge reconnects, but **`rplidar_node` is left holding a dead port and `/scan` never appears**, so there is no map, no `/pose` and no TF `map -> base_link`.
+- **Why:** the Pi reports a 3 A supply (`/proc/device-tree/chosen/power/max_current` = 3000), and on anything under 5 A a Pi 5 limits its USB ports to 600 mA in total. The Brio camera declares 500 mA, the ESP32 500 mA, and the LiDAR motor draws more when it spins up. `usb_max_current_enable=1` is in `/boot/firmware/config.txt` (last line) **but is not applied**: the device tree and `vcgencmd get_config usb_max_current_enable` both say 0. Not found out why. At 1:30 AM, before two Pi reboots, the same three devices ran with `/scan` at 10 Hz; what powered the Pi then is not known here.
+- **Fixes, none done:** power the Pi from a 5 V 5 A supply (the official 27 W one) or a power bank that offers 5 A; or put the LiDAR (or the camera) on a powered USB hub; or set `PSU_MAX_CURRENT=5000` in the bootloader configuration (`sudo rpi-eeprom-config --edit`, then reboot), which raises the limit to 1.6 A whatever the supply and may brown out a weak power bank. After any of them: `~/scout_down.sh --keep && ~/scout_up.sh --nav` on the Pi and check `dmesg | grep over-current`.
+- **The Pi rebooted twice in this half hour** (about 2:15 and 2:26 AM) without a command from this session. It does not start its stack by itself after a reboot.
+- **`jetson_up.sh` (so `~/start_understory.sh`) exits before the AI when it cannot see `/scan`.** The Jetson's AI was started directly: `AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia AI_ONE_PROCESS=1 WHISPER_MODEL=none DETECTOR_BACKEND=nanoowl_trt ~/fetch_ws/src/Understory/pi/scout_ai_up.sh`.
+- Left running at 2:35 AM. Pi: camera 15 Hz, Quest endpoint, Foxglove, ESP32 bridge (`shield=ok`), mission manager (`IDLE`), Nav2 and slam_toolbox with no scans, Whisper. Jetson: detector, species, localizer, dashboard on port 8501.
+- **2:40 AM: the LiDAR is back.** The Pi was on the wall supply until about 2:15 AM and has been on the power bank since; that is when the over-current started. Alvaro set `PSU_MAX_CURRENT=5000` in the Pi's bootloader configuration (the old one is in `~/eeprom_before.txt` on the Pi; undo with `sudo rpi-eeprom-config --apply ~/eeprom_before.txt` and a reboot). After the reboot the device tree shows `usb_max_current_enable` 1, and `~/scout_up.sh --nav` gave `/scan` 10.0 Hz, camera 15.0 Hz, `IDLE`, TF ok, **no over-current line**. From the Jetson: `/detections` 15.1 Hz, `/pose` 10.4 Hz, 44 nodes, none twice, one `/cmd_vel` publisher, ping 5 ms.
+- **The power bank is at its limit:** two minutes after that start `vcgencmd get_throttled` on the Pi was `0x50000` (under-voltage and throttling have each happened since boot; neither active at the time of the check), and the 5 V rail read 4.81 V then 5.02 V. Nothing has been driven yet; the motors are on their own batteries, but a spin with the camera and LiDAR running is the test. If the Pi reboots during the survey, this is the first suspect: `vcgencmd get_throttled` and `dmesg | grep -iE "over-current|voltage"`.
+
+**Session 12, continued, Sun 2:45 to 3:30 AM.** *"Make the pull request and move the test m1 away"*, then *"take a look into the new dashboard that got pushed, make sure everything works including the websocket or VR display"*, then *"put the Hugging Face and run.sh on the new design ... put [the Unity steps] in an updated handoff ... upload the changes."*
+- **PR #15** (`hf-hub-handoff` into `main`) is open. `main` (PR #14, the first dashboard redesign) and then branch `dashboard` (mizbahh, 3:03 and 3:05 AM: one-page design, headset view, live LiDAR, `HeadsetStreamer.cs`) were merged into it. `dashboard/app.py` is the new one-page design with the "Hugging Face" data source added to its sidebar. 13 dashboard tests pass.
+- **The one-page design has no Before / after, Similar plants or Sensors view.** The "7 found -> 1 remaining" comparison is now only in the Quest app. The functions are still in `mission_io.py`.
+- **`dashboard/run.sh` starts three things:** the dashboard (`:8501`), `live_relay.py` (`:8770`) and, where the `scout` ROS container runs, `scan_bridge.py` inside it. `--stop` stops all three; `NO_LIVE=1` starts the dashboard alone. `aiohttp` and `websockets` were added to `dashboard/.venv` (they are in `requirements.txt`).
+- **Live LiDAR, tested with the real robot:** the bridge runs in the Jetson's `scout` container and reads `/scan` and TF over the network; scans reach the relay about 0.1 s old, 525 points plus the robot's pose, and the page shows "LiDAR live". **The live scan is in the current mapping session's coordinates and is drawn on the selected mission's saved map**, so it only lines up with a mission recorded since mapping last started (at 3:07 AM the robot was at about (2.4, -8.9) m, off the fake 5 m maps).
+- **Headset WebSocket, tested without a headset:** 24 JPEG frames at 8 a second into `ws://172.20.10.4:8770/ws/headset/pub`, all 24 received on `/ws/headset`; a viewer that connects late gets the newest frame at once. The browser side was read, not opened in a browser by this session. Kevin's steps are in section 8a.
+- `st.components.v1.html` (the headset panel) prints a deprecation warning on Streamlit 1.65 and still works.
+- **Test missions moved aside, nothing restarted:** Jetson `~/fetch_ws/missions/m1_table_test_sun`, Pi `~/fetch_ws/missions/m1_test_sun_0247`. Pin and bubble counters were not reset: restart both sides just before the real survey to start at `m1-p01` and `m1-b01`, and move away any `m1` that has appeared by then.
+- With all of it running at 3:25 AM: camera 15 Hz, `/detections` 15 Hz, ping to the Pi 6 ms, 2.4 GB available on the Jetson.
 
 ## 12. Rules for anyone (or any agent) continuing
 
@@ -685,6 +768,8 @@ sudo nmcli con up hotspot     # if it fell back to eduroam
 date                          # check after every reboot
 
 # ---- Jetson host ----
+~/fetch_ws/src/Understory/dashboard/run.sh    # dashboard :8501 + live relay :8770 + LiDAR bridge (--stop stops all three)
+CAMERA_TOPIC=/camera/image/throttled ~/start_understory.sh   # weak hotspot: the Pi must run camera_throttle.py
 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 NO_AI=1 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
