@@ -31,7 +31,7 @@ follow the rules in section 12.
 | `/sensors` from the ESP32 | **Bridge republishes it; no sensor is wired in the firmware yet** | `fake_sensors.py` stands in |
 | Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. **No human voice and no Quest clip tried yet** |
 | NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
-| Mission logger (`logger_node`) | Works with fake data | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). No real mission logged yet |
+| Mission logger (`logger_node`) | Works with fake data; live pins and crops written Sat night | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). Live: 12 pins and crops in `missions/m1`, all false alarms, no bubble captured yet (session 10, continued) |
 | AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
 | Dashboard, Neon sync | Not in the repo | other owners |
 
@@ -97,7 +97,7 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 | --- | --- |
 | `detector_node.py` | camera -> `/detections`. Parameters: `backend`, `prompts`, `score_threshold` |
 | `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (real, Jetson only: TensorRT engine from `pi/scripts/build_owl_engine.py`) |
-| `species_node.py` | `/detections` + camera -> `/species`. Parameters: `backend`, `min_confidence` (0.5), `max_boxes` (3) |
+| `species_node.py` | `/detections` + camera -> `/species`. Parameters: `backend`, `min_confidence` (0.6), `max_boxes` (3) |
 | `species_backends.py` | `dummy`, `bioclip` |
 | `species_labels.py` | **The species list. Edit this to match the habitat.** Also the "not a plant" list |
 | `localizer_node.py` | `/species` + `/scan` + TF -> `/survey/pins`; `/sensors` -> `/survey/readings` |
@@ -122,6 +122,8 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
    BioCLIP to pick from the fixed list in `species_labels.py`. The list also holds non-plant entries
    ("a photo of a wall", "a photo of a hand", ...). If one of those wins, or confidence is under
    `min_confidence`, nothing is published. This removed a false "cogongrass" on a ceiling decoration.
+   Since Sat 10:15 PM the list also holds other living things by scientific name (`OTHER_LIFE`: people,
+   pets, ornamental and house plants), because the phrases alone let a face through (session 10, later).
 3. **Localizer** turns the box centre into a direction (camera yaw from TF + pinhole angle from
    `hfov`), reads the LiDAR range in that direction, and projects it into the map from TF
    `map -> base_link`. Sightings of the same label within 0.5 m merge into one pin. A pin is published
@@ -613,6 +615,20 @@ installed on it."*
 - **Fixed after that (PR #8):** `scout_up.sh` printed `172.20.10.10` whatever the Pi's address was; it now prints the real one. Both start scripts ask for the node list without the ROS daemon's cache before deciding that no other mapping stack is running. `splat/align.py` restored from commit `304f251` (it was emptied by the "rescue" commit): `splat/tests` 7 pass. **Kevin should check that restored file is the version he wants.**
 - Git push from the Pi over SSH needs `git -c credential.helper='!gh auth git-credential' push origin <branch>`; a plain `git push` there fails with "could not read Username".
 - Left on disk, safe to delete: `~/fetch_ws/logs/deep_test/` (the photo test mission).
+
+**Session 10, continued, Sat 8:40 to 10:25 PM, on the Jetson.** *"I connected the LiDAR now, do whatever you need"*, then *"check the repo for any changes and then work on what needs to be done."*
+- **8:39 PM: the Jetson moved to the hotspot "iPhone (2)" while ROS was running** (address `.11` to `172.20.10.4`). Its nodes kept running but no longer heard the Pi: `/scan` 3 Hz, 15% ping loss. Fix: stop every ROS node on the Jetson, `ros2 daemon stop`, `~/start_understory.sh`. After that 0% loss and `/scan` 10 Hz. **A change of network or address under a running stack needs a full restart of that stack.**
+- Since then, one of each node on the network (checked again at 10:05 PM, 43 nodes, no name twice): Jetson has mapping, Nav2, mission manager, twist_mux, panorama, logger, `pose_from_tf`, detector, species, localizer; Pi has LiDAR, camera, endpoint, Foxglove, ESP32 bridge, Whisper. Quest connected from `172.20.10.2`.
+- Rates on the Jetson at 10:08 PM: `/detections` 15.5 Hz, camera 14.0 Hz, `/pose` 10.0 Hz, `/scan` 10.5 Hz. `tegrastats` with everything running: 5.3 of 7.5 GB RAM, 53 °C, 9 to 11 W.
+- **Robot driving, state at 10:05 PM: the bridge is connected (`shield=ok`) and has received about 2,900 commands, all zero.** No `moving=1` line in `esp32_bridge.log` since the bridge started at 9:34 PM, no message on `/cmd_vel_teleop` in 12 s, and `/mission/state` was `STOPPED` (B button or "stop"). The twist_mux e-stop lock holds until the Quest publishes `false` on `/estop`. Wheels turning from the Quest is still unproven.
+- PR #8 was merged at 8:27 PM. The Jetson's repo is on `main` at Kevin's `56fe2fd` (bridge re-sends the last command at 20 Hz and stops on `/estop`; firmware re-sends stop while idle) plus branch `jetson-sat-late`. Nothing in those commits runs on the Jetson, so nothing was rebuilt.
+- `jetson_up.sh` now asks both ways for an existing slam_toolbox (fresh discovery and the ROS daemon), the same as the Pi's `scout_up.sh --nav` in PR #9. Checked with the stack up: both lists contain it.
+- Whisper was not running on the Pi at 10:05 PM (the Pi's sensors had been restarted at about 9:55 PM). Started again with `~/scout_ai_up.sh --voice-only` at 10:11 PM; the log shows the node running.
+- **The first real pins were all wrong.** The logger wrote `~/fetch_ws/missions/m1/pins.jsonl` from the live camera between 8:57 and 10:12 PM: 12 pins, no bubble. The crops are a face (Brazilian pepper, 0.93), a garland of purple artificial flowers (air potato 0.97, cogongrass, saw palmetto), a T-shirt print and blurred frames. So the logger works with real data, and the classifier pinned things that are not the five plants.
+- **Fix: `OTHER_LIFE` in `species_labels.py`** (20 scientific names: Homo sapiens, cat, dog, wisteria, pothos, ...) is scored beside the five species and the phrase list; if one wins, the crop is dropped. `species_node` `min_confidence` 0.5 to 0.6. Measured with BioCLIP on the Pi's CPU on the first 11 crops and the five `test_plants` photos: before, the 11 crops scored 0.41 to 0.95 for a listed species; after, 8 lose to another name and the other 3 score 0.42, 0.50 and 0.52, so all 11 are dropped; the five photos stay at 1.00. Adding more phrases ("a photo of a human face", "artificial flowers", ...) changed 2 of 11. The cosine similarity alone does not separate them (a good Brazilian pepper photo 0.264, the garland 0.283).
+- **Limits of that test:** wisteria is in the list because the garland was in the room, so the 11 crops are not an independent test. The five good photos are clean web photos; a real or printed plant seen by the robot's camera will score lower than 1.00 and may now fall under 0.6. Not measured. If real plants stop being pinned, lower it: `-p species_node:min_confidence:=0.5`.
+- The Jetson's AI node was restarted at 10:18 PM with the new list (only `ai_node`; mapping, mission and the localizer were not touched). 35 `scout_perception` tests and 7 `amd` tests pass. `amd/deep_pass.py` still uses the phrase list only.
+- **Before recording the real mission, move `~/fetch_ws/missions/m1` away** (it holds the 12 wrong pins and their crops), or the dashboard, the deep pass and the Quest get them too.
 
 ## 12. Rules for anyone (or any agent) continuing
 

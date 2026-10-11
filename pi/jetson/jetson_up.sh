@@ -67,9 +67,10 @@ fi
 # --- 5. mapping + mission + panorama ---
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   echo "Nav already running here."
-# --no-daemon: the ROS daemon's cached list missed a Pi that had just rejoined the network (Sat 7:50 PM),
-# and a second mapping stack was started beside the Pi's
-elif in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6" | grep -q slam_toolbox; then
+# Ask twice, like scout_up.sh --nav: fresh discovery (--no-daemon) and the ROS daemon's list. Each has missed a
+# running stack once: the daemon on Sat 7:50 PM (the Pi had just rejoined the network), fresh discovery on
+# Sat 8:32 PM (the hotspot dropped packets for a minute). Neither sees a machine that is off the network.
+elif { in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6"; in_scout "timeout 5 ros2 node list"; } 2>/dev/null | grep -q slam_toolbox; then
   warn "slam_toolbox is already running on the Pi. Stop it there first (~/scout_down.sh --keep && ~/scout_up.sh), then re-run this."
   # the mission still has to be written to disk; the logger only listens, so it is safe beside the Pi's stack
   if ! in_scout "timeout 5 ros2 node list" | grep -q logger_node; then

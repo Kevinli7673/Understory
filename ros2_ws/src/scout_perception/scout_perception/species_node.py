@@ -27,7 +27,7 @@ class SpeciesNode(Node):
         super().__init__('species_node')
         backend = self.declare_parameter('backend', 'dummy').value
         # below this the crop is "none of the listed plants" and nothing is published
-        self.min_confidence = self.declare_parameter('min_confidence', 0.5).value
+        self.min_confidence = self.declare_parameter('min_confidence', 0.6).value
         self.max_boxes = self.declare_parameter('max_boxes', 3).value          # per frame, best first
         self.min_box_px = self.declare_parameter('min_box_px', 24).value
         self.backend = make_species_backend(backend)
