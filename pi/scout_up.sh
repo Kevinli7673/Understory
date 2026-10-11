@@ -3,6 +3,8 @@
 # Safe to re-run: anything already running is left alone.
 #   ~/scout_up.sh         sensors + Foxglove + Quest endpoint (use this when the Jetson runs mapping/mission)
 #   ~/scout_up.sh --nav   also mapping + Nav2 + mission manager + panorama on the Pi (no Jetson needed)
+#   ESP32_ARGS="--strafe-fix 1.0" ~/scout_up.sh   extra esp32_bridge.py options (--trim, --strafe-fix, --no-strafe)
+#   NAV_ARGS="linear_scale:=0.6 angular_scale:=0.7" ~/scout_up.sh --nav   extra scout_nav.launch.py arguments
 #   NO_DRIVE=1 ~/scout_up.sh   do not start the ESP32 bridge (wheels and /sensors) even if the board is plugged in
 #   SCOUT_PEER=<other machine's IP> ~/scout_up.sh   only if the Jetson can't see the Pi's topics:
 #       makes ROS discovery talk straight to that IP instead of relying on multicast
@@ -81,7 +83,7 @@ elif docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
   echo "ESP32 bridge already running."
 elif [ -n "$ESP32_PORT" ]; then
   echo "Starting ESP32 bridge on $ESP32_PORT..."
-  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py > /fetch_ws/logs/esp32_bridge.log 2>&1"
+  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py $ESP32_ARGS > /fetch_ws/logs/esp32_bridge.log 2>&1"
 else
   echo "No ESP32 plugged in: the robot cannot drive and /sensors is empty. Plug it in and re-run this script."
 fi
@@ -96,7 +98,7 @@ if [ "$1" = "--nav" ]; then
     warn "slam_toolbox is already running on another machine (the Jetson?). Not starting a second one."
   else
     echo "Starting slam + Nav2 + mission + panorama..."
-    docker exec -d $PEER scout bash -c "$SRC && ros2 launch /fetch_ws/src/Understory/pi/scout_nav.launch.py > /fetch_ws/logs/nav.log 2>&1"
+    docker exec -d $PEER scout bash -c "$SRC && ros2 launch /fetch_ws/src/Understory/pi/scout_nav.launch.py $NAV_ARGS > /fetch_ws/logs/nav.log 2>&1"
   fi
 fi
 
