@@ -90,7 +90,9 @@ fi
 if [ "$1" = "--nav" ]; then
   if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
     echo "Nav (slam + Nav2 + mission + panorama) already running."
-  elif in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6" | grep -q slam_toolbox; then
+  # Ask twice: fresh discovery (--no-daemon) and the ROS daemon's list. Each has missed a running stack once:
+  # the daemon on Sat 7:50 PM, fresh discovery on Sat 8:32 PM while the hotspot dropped packets for a minute.
+  elif { in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6"; in_scout "timeout 5 ros2 node list"; } 2>/dev/null | grep -q slam_toolbox; then
     warn "slam_toolbox is already running on another machine (the Jetson?). Not starting a second one."
   else
     echo "Starting slam + Nav2 + mission + panorama..."
@@ -103,9 +105,17 @@ echo "Waiting for nodes, then measuring rates (~15 s)..."
 sleep 5
 for topic in /scan /camera/image/compressed; do
   rate=$(in_scout "timeout 8 ros2 topic hz $topic 2>/dev/null" | grep 'average rate' | tail -1 | awk '{print $3}')
-  if [ -n "$rate" ]; then echo "  $topic: $rate Hz"; else warn "$topic is NOT publishing"; fi
+  if [ -n "$rate" ]; then echo "  $topic: $rate Hz"
+  elif [ "$topic" = /scan ] && ! ls /dev/serial/by-id/*"$LIDAR_ID"* >/dev/null 2>&1; then
+    # the LiDAR node does not find the device again by itself once it has been unplugged
+    warn "/scan is NOT publishing: the LiDAR is not plugged in. Plug it in, then ~/scout_down.sh --keep && ~/scout_up.sh"
+  else warn "$topic is NOT publishing"; fi
 done
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
+  # the check before starting can miss the other machine; a name listed twice means two stacks are on the network
+  if [ "$(in_scout "timeout 5 ros2 node list" 2>/dev/null | grep -c '^/slam_toolbox$')" -gt 1 ]; then
+    warn "TWO slam_toolbox nodes on the network (this Pi and the Jetson). Stop this one now: ~/scout_down.sh --keep && ~/scout_up.sh"
+  fi
   state=$(in_scout "timeout 5 ros2 topic echo /mission/state --once --field data 2>/dev/null" | head -1)
   if [ -n "$state" ]; then echo "  /mission/state: $state"; else warn "mission manager is NOT publishing /mission/state"; fi
   if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q Translation; then

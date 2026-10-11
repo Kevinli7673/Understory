@@ -3,9 +3,9 @@
     (label, invasive, confidence, embedding)      embedding: list of 512 floats
 
 choosing only among the fixed list in species_labels.py. label is None when the crop looks more
-like one of the NOT_PLANTS entries than like any listed species.
+like one of the reject_prompts() (not a plant, or another species) than like any listed species.
 """
-from scout_perception.species_labels import EMBEDDING_SIZE, NOT_PLANTS, SPECIES, prompt
+from scout_perception.species_labels import EMBEDDING_SIZE, SPECIES, prompt, reject_prompts
 
 
 class DummySpecies:
@@ -33,7 +33,7 @@ class BioClipSpecies:
         self.dtype = torch.float16 if self.device == 'cuda' else torch.float32
         self.model = self.model.to(self.dtype)
         tokens = open_clip.get_tokenizer(model_name)(
-            [prompt(label, sci) for label, _, sci in SPECIES] + NOT_PLANTS)
+            [prompt(label, sci) for label, _, sci in SPECIES] + reject_prompts())
         with torch.no_grad():
             text = self.model.encode_text(tokens.to(self.device)).float()
             self.text = text / text.norm(dim=-1, keepdim=True)
