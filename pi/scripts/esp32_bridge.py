@@ -9,9 +9,13 @@ Firmware and line protocol: firmware/esp32_drive/esp32_drive.ino
     to ESP32:   "C <vx> <vy> <wz>\\n"  (ROS axes, m/s and rad/s), sent for every /cmd_vel message
     from ESP32: "{...}" sensor JSON -> /sensors (std_msgs/String), "# ..." status -> log
 
-/cmd_vel comes from twist_mux (e-stop > Quest teleop > autonomy). When nothing publishes, the bridge
-sends nothing and the ESP32's 300 ms watchdog stops the motors, so a dead bridge, Pi or cable also stops
-the robot. Stop fake_sensors.py once the real sensor pod publishes here.
+/cmd_vel comes from twist_mux (e-stop > Quest teleop > autonomy). Over the hotspot (Quest -> Pi -> Jetson
+twist_mux -> Pi) commands arrive in bursts with gaps > 300 ms, so the ESP32's watchdog kept stopping the
+wheels. The bridge therefore re-sends the latest command at 20 Hz while it is < --hold seconds old (0.5 s,
+twist_mux's own timeout). When commands stop, re-sending stops and the 300 ms watchdog stops the motors
+(<= ~0.8 s); a dead bridge, Pi or cable also stops the robot. /estop true -> immediate "S" and no
+re-sending until released (doesn't wait for twist_mux). Stop fake_sensors.py once the real sensor pod
+publishes here.
 
 Port: --port, else the first /dev/serial/by-id device that is NOT the LiDAR (its CP2102N id is in
 scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM*/ttyUSB* likewise.
@@ -25,7 +29,7 @@ import time
 import rclpy
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 
 import serial
 
@@ -44,15 +48,20 @@ def find_port():
 
 
 class Esp32Bridge(Node):
-    def __init__(self, port, baud):
+    def __init__(self, port, baud, hold):
         super().__init__('esp32_bridge')
-        self.port_arg, self.baud = port, baud
+        self.port_arg, self.baud, self.hold = port, baud, hold
         self.ser = None
         self.buf = b''
         self.last_status = ''
         self.sent = 0
+        self.last_cmd = None        # latest command line, re-sent while fresh
+        self.last_cmd_t = 0.0
+        self.estop = False
         self.pub = self.create_publisher(String, '/sensors', 10)
         self.create_subscription(Twist, '/cmd_vel', self.on_cmd, 10)
+        self.create_subscription(Bool, '/estop', self.on_estop, 10)
+        self.create_timer(0.05, self.resend)        # 20 Hz keep-alive of the latest command
         self.create_timer(0.02, self.poll)          # read ESP32 output at 50 Hz
         self.create_timer(2.0, self.ensure_open)    # (re)connect if unplugged
         self.ensure_open()
@@ -80,15 +89,39 @@ class Esp32Bridge(Node):
         self.ser = None
         self.buf = b''
 
-    def on_cmd(self, msg):
+    def write(self, line):
         if self.ser is None:
             return
-        line = f'C {msg.linear.x:.3f} {msg.linear.y:.3f} {msg.angular.z:.3f}\n'
         try:
             self.ser.write(line.encode('ascii'))
             self.sent += 1
         except (serial.SerialException, OSError) as e:
             self.drop(e)
+
+    def on_cmd(self, msg):
+        if self.estop:
+            return
+        self.last_cmd = f'C {msg.linear.x:.3f} {msg.linear.y:.3f} {msg.angular.z:.3f}\n'
+        self.last_cmd_t = time.monotonic()
+        self.write(self.last_cmd)
+
+    def resend(self):
+        if self.estop or self.last_cmd is None:
+            return
+        if time.monotonic() - self.last_cmd_t < self.hold:
+            self.write(self.last_cmd)
+        else:
+            self.last_cmd = None    # stale: stop re-sending; the ESP32 watchdog stops the motors
+
+    def on_estop(self, msg):
+        if msg.data and not self.estop:
+            self.get_logger().warn('E-STOP: motors stopped')
+        elif not msg.data and self.estop:
+            self.get_logger().info('e-stop released')
+        self.estop = msg.data
+        if self.estop:
+            self.last_cmd = None
+            self.write('S\n')
 
     def poll(self):
         if self.ser is None:
@@ -128,9 +161,11 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--port', default='', help='serial device (default: auto, never the LiDAR)')
     ap.add_argument('--baud', type=int, default=115200)
+    ap.add_argument('--hold', type=float, default=0.5,
+                    help='re-send the latest /cmd_vel while it is younger than this (s); bridges Wi-Fi gaps')
     args = ap.parse_args()
     rclpy.init()
-    node = Esp32Bridge(args.port, args.baud)
+    node = Esp32Bridge(args.port, args.baud, args.hold)
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
