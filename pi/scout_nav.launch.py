@@ -52,6 +52,8 @@ def generate_launch_description():
         # cmd_vel_odom calibration: real speed / commanded speed (drive straight / spin in place and measure)
         DeclareLaunchArgument('linear_scale', default_value='1.0'),
         DeclareLaunchArgument('angular_scale', default_value='1.0'),
+        # camera horizontal field of view (rad) written into each bubble; the Quest sizes the photos with it
+        DeclareLaunchArgument('hfov', default_value='0.83'),
     ]
 
     # pi/slam_toolbox_pi.yaml: understory_nav's config + trust the LiDAR more than the dead-reckoned odom
@@ -98,6 +100,7 @@ def generate_launch_description():
                                {'mission_id': LaunchConfiguration('mission_id')}])
 
     panorama = Node(package='scout_perception', executable='panorama_node', name='panorama_node',
+                    parameters=[{'hfov': ParameterValue(LaunchConfiguration('hfov'), value_type=float)}],
                     condition=IfCondition(LaunchConfiguration('panorama')))
 
     logger = Node(package='scout_perception', executable='logger_node', name='logger_node',
