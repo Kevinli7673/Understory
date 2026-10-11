@@ -14,7 +14,8 @@ namespace Understory
         [SerializeField] TabletopMap table;
         [SerializeField] string topic = "/camera/image/compressed";
         [SerializeField] float maxFps = 15f;
-        [SerializeField] float width = 0.5f;
+        // renamed from "width" (scene had 0.5 saved): 0.85 m wide, readable from the table and on the dashboard
+        [SerializeField] float screenWidth = 0.85f;
         [SerializeField] float offlineAfter = 3f;
 
         Transform screen;
@@ -89,11 +90,11 @@ namespace Understory
         void Place()
         {
             if (screen == null) return;
-            float h = width * aspect;
+            float h = screenWidth * aspect;
             var pos = new Vector3(0f, h / 2f + 0.06f, table.HalfExtents.y + 0.05f);
             screen.localPosition = pos;
             screen.localRotation = Quaternion.Euler(-8f, 0f, 0f); // lean back slightly
-            screen.localScale = new Vector3(width, h, 1f);
+            screen.localScale = new Vector3(screenWidth, h, 1f);
             offline.transform.localPosition = pos - Vector3.forward * 0.005f;
             offline.transform.localRotation = screen.localRotation;
         }

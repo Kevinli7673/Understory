@@ -41,8 +41,8 @@ namespace Understory
         // while the table is hidden (inside a bubble).
         public enum View { Table, Head }
         [SerializeField] View view = View.Table;
-        [SerializeField] float tableCamHeight = 0.7f;   // above the slab top (m)
-        [SerializeField] float tableCamBack = 0.55f;    // behind the near edge (m)
+        [SerializeField] float tableCamHeight = 0.75f;  // above the slab top (m)
+        [SerializeField] float tableCamBack = 0.8f;     // behind the near edge (m)
         TabletopMap table;
 
         public static HeadsetStreamer Instance { get; private set; }
