@@ -12,18 +12,20 @@ fi
 
 # Ctrl+C-style stop so nodes shut down properly (the lidar takes ~5 s to spin down)
 echo "Stopping ROS processes..."
-for pat in 'ros2 launch' 'ros2 bag record' default_server_endpoint usb_cam_node_exe fake_survey.py save_frames.py lib/scout_perception; do
+for pat in 'ros2 launch' 'ros2 bag record' default_server_endpoint usb_cam_node_exe fake_survey.py save_frames.py lib/scout_perception \
+    esp32_bridge.py pose_from_tf.py; do
   docker exec scout pkill -INT -f "$pat"
 done
 # the plant AI lives in its own container (scout_ai_up.sh); it is left running, only its nodes stop
 if [ "$(docker inspect -f '{{.State.Running}}' scout-ai 2>/dev/null)" = "true" ]; then
-  for pat in detector_node species_node localizer_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
+  for pat in detector_node species_node localizer_node whisper_node fake_sensors.py; do docker exec scout-ai pkill -INT -f "$pat"; done
 fi
 sleep 8
 # anything still alive gets a hard kill
 for pat in rplidar_node usb_cam_node_exe foxglove_bridge static_transform_publisher default_server_endpoint \
     async_slam_toolbox_node twist_mux lib/understory_nav lib/scout_perception \
-    controller_server planner_server behavior_server bt_navigator lifecycle_manager 'ros2 launch'; do
+    controller_server planner_server behavior_server bt_navigator lifecycle_manager 'ros2 launch' \
+    esp32_bridge.py pose_from_tf.py; do
   docker exec scout pkill -KILL -f "$pat"
 done
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs 2>/dev/null

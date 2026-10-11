@@ -7,7 +7,7 @@
 #   pi/scripts/ai_selftest.sh [photo folder] [seconds per photo]
 #   default folder: ~/fetch_ws/test_plants (any .jpg photos of the plants in species_labels.py)
 #
-# DETECTOR_BACKEND / SPECIES_BACKEND / DETECTOR_THRESHOLD work as in scout_ai_up.sh.
+# DETECTOR_BACKEND / SPECIES_BACKEND / DETECTOR_THRESHOLD / AI_ONE_PROCESS work as in scout_ai_up.sh.
 
 FOLDER=${1:-$HOME/fetch_ws/test_plants}
 HOLD=${2:-20}
@@ -16,12 +16,17 @@ SRC='source /opt/ros/jazzy/setup.bash && source /ros2_ws/install/setup.bash && s
 [ -d "$FOLDER" ] || { echo "No folder $FOLDER. Put a few plant .jpg photos there."; exit 1; }
 [ "$(docker inspect -f '{{.State.Running}}' scout-ai 2>/dev/null)" = "true" ] || { echo "Run ~/scout_ai_up.sh once first (it creates the scout-ai container)."; exit 1; }
 
-for pat in detector_node species_node localizer_node; do docker exec scout-ai pkill -INT -f "$pat"; done
+for pat in ai_node detector_node species_node localizer_node; do docker exec scout-ai pkill -INT -f "$pat"; done
 sleep 2
 docker exec scout-ai rm -rf /tmp/selftest && docker exec scout-ai mkdir -p /tmp/selftest/photos
 docker cp "$FOLDER/." scout-ai:/tmp/selftest/photos >/dev/null
-docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH > /tmp/selftest/detector.log 2>&1"
-docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception species_node --ros-args -p backend:=$SPEC > /tmp/selftest/species.log 2>&1"
+if [ -n "$AI_ONE_PROCESS" ]; then   # one log, under both names
+  docker exec scout-ai ln -s detector.log /tmp/selftest/species.log
+  docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception ai_node --ros-args -p detector_node:backend:=$DET -p detector_node:score_threshold:=$THRESH -p species_node:backend:=$SPEC > /tmp/selftest/detector.log 2>&1"
+else
+  docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH > /tmp/selftest/detector.log 2>&1"
+  docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception species_node --ros-args -p backend:=$SPEC > /tmp/selftest/species.log 2>&1"
+fi
 docker exec -d scout-ai bash -c "$SRC && ros2 run scout_perception localizer_node --ros-args -p missions_dir:=/tmp/selftest/missions > /tmp/selftest/localizer.log 2>&1"
 echo "Loading models..."
 for i in $(seq 60); do
@@ -29,6 +34,6 @@ for i in $(seq 60); do
   sleep 3
 done
 docker exec scout-ai bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/ai_selftest.py /tmp/selftest/photos --hold $HOLD"
-for pat in detector_node species_node localizer_node; do docker exec scout-ai pkill -INT -f "$pat"; done
+for pat in ai_node detector_node species_node localizer_node; do docker exec scout-ai pkill -INT -f "$pat"; done
 echo "Logs: docker exec scout-ai tail /tmp/selftest/{detector,species,localizer}.log"
 echo "The live AI nodes are stopped. Restart them with ~/scout_ai_up.sh"

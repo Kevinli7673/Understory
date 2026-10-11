@@ -3,6 +3,7 @@
 # Safe to re-run: anything already running is left alone.
 #   ~/scout_up.sh         sensors + Foxglove + Quest endpoint (use this when the Jetson runs mapping/mission)
 #   ~/scout_up.sh --nav   also mapping + Nav2 + mission manager + panorama on the Pi (no Jetson needed)
+#   NO_DRIVE=1 ~/scout_up.sh   do not start the ESP32 bridge (wheels and /sensors) even if the board is plugged in
 #   SCOUT_PEER=<other machine's IP> ~/scout_up.sh   only if the Jetson can't see the Pi's topics:
 #       makes ROS discovery talk straight to that IP instead of relying on multicast
 
@@ -42,6 +43,11 @@ else
     -v /dev:/dev -v "$HOME/fetch_ws:/fetch_ws" scout-ros sleep infinity >/dev/null || exit 1
 fi
 docker exec scout mkdir -p /fetch_ws/logs
+# 70 KB camera frames cross the hotspot as ~50 IP fragments each. With the kernel defaults, lost fragments
+# sit in the reassembly queue for 30 s, fill it, and then no frame gets through at all (seen on the Jetson).
+# Not namespaced, so setting it from the privileged host-network container sets it for the host. Lost on reboot.
+docker exec scout sysctl -q -w net.ipv4.ipfrag_time=3 net.ipv4.ipfrag_high_thresh=134217728 \
+  net.core.rmem_max=16777216 net.core.rmem_default=16777216
 
 # --- 4. bringup + Quest endpoint (detached, logs in ~/fetch_ws/logs) ---
 if docker exec scout pgrep -f scout_bringup.launch.py >/dev/null; then
@@ -64,11 +70,27 @@ else
   docker exec -d $PEER scout bash -c "$SRC && ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0 > /fetch_ws/logs/tcp_endpoint.log 2>&1"
 fi
 
+# --- 4a. ESP32 bridge: /cmd_vel -> wheels, sensor pod -> /sensors (only when the board is plugged in) ---
+# The LiDAR is a USB serial device too; esp32_bridge.py never picks it. /cmd_vel only comes from twist_mux
+# (e-stop > Quest sticks > autonomy), and the firmware stops the wheels 300 ms after the last command.
+LIDAR_ID=5839a1d8ce6ff01187f694301045c30f
+ESP32_PORT=$(ls /dev/serial/by-id/* 2>/dev/null | grep -v "$LIDAR_ID" | head -1)
+if [ -n "$NO_DRIVE" ]; then
+  echo "ESP32 bridge not started (NO_DRIVE is set)."
+elif docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
+  echo "ESP32 bridge already running."
+elif [ -n "$ESP32_PORT" ]; then
+  echo "Starting ESP32 bridge on $ESP32_PORT..."
+  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py > /fetch_ws/logs/esp32_bridge.log 2>&1"
+else
+  echo "No ESP32 plugged in: the robot cannot drive and /sensors is empty. Plug it in and re-run this script."
+fi
+
 # --- 4b. optional: mapping + mission + panorama on the Pi (Teammate 3's understory_nav, no Nav2) ---
 if [ "$1" = "--nav" ]; then
   if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
     echo "Nav (slam + Nav2 + mission + panorama) already running."
-  elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
+  elif in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6" | grep -q slam_toolbox; then
     warn "slam_toolbox is already running on another machine (the Jetson?). Not starting a second one."
   else
     echo "Starting slam + Nav2 + mission + panorama..."
@@ -90,11 +112,18 @@ if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
     echo "  TF map -> base_link: ok (slam is localizing)"
   else warn "no TF map -> base_link (slam_toolbox not mapping; check ~/fetch_ws/logs/nav.log)"; fi
 fi
+if docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
+  if grep -q 'ESP32 on ' "$HOME/fetch_ws/logs/esp32_bridge.log" 2>/dev/null; then
+    echo "  ESP32 bridge: $(grep 'ESP32 on ' "$HOME/fetch_ws/logs/esp32_bridge.log" | tail -1 | sed 's/.*ESP32 on /connected on /')"
+  else warn "ESP32 bridge is running but has not opened the serial port. See ~/fetch_ws/logs/esp32_bridge.log"; fi
+fi
 for port in 10000 8765; do
   if ss -ltn | grep -q ":$port "; then echo "  port $port: listening"; else warn "port $port is NOT listening"; fi
 done
 
 # files the container creates are root-owned; hand them back to the host user
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs
-echo "Done. Quest: ROS IP 172.20.10.10 port 10000 | Foxglove: ws://172.20.10.10:8765 | shell: ~/scout_shell.sh"
+# the phone hands out the address, and it changes (.10 on Saturday afternoon, .3 that evening): print the real one
+MYIP=$(tr ' ' '\n' <<<"$ips" | grep -m1 '^172\.20\.10\.'); MYIP=${MYIP:-<Pi address>}
+echo "Done. Quest: ROS IP $MYIP port 10000 | Foxglove: ws://$MYIP:8765 | shell: ~/scout_shell.sh"
 echo "Plant AI on this machine (slow on the Pi, about 1 frame every 4 s): ~/scout_ai_up.sh"

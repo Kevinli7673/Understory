@@ -21,6 +21,7 @@ cloned at `~/fetch_ws/src/Understory`.
 | `scripts/fake_sensors.py` | Publish fake `/sensors` (what the ESP32 bridge will send) so `/survey/readings` can be tested. |
 | `scripts/pose_from_tf.py` | TF `map -> base_link` -> `/pose` (PoseWithCovarianceStamped) for the Quest's robot marker; slam_toolbox here doesn't publish `/pose`. |
 | `scripts/esp32_bridge.py` | `/cmd_vel` -> ESP32 wheels (`firmware/esp32_drive`), ESP32 sensor JSON -> `/sensors`. Auto-picks the ESP32's serial port, never the LiDAR's. |
+| `../amd/deep_pass.py` | After a mission, on the AMD W7900 (ROCm): larger detector over every bubble frame -> `pins_deep.jsonl`. See `amd/README.md`. |
 | `scripts/ai_selftest.sh` | Feed plant photos through the whole AI chain on a separate ROS domain and print the pins. |
 | `docker/Dockerfile.ai` | The `scout-ros-ai` image: `scout-ros` plus CPU PyTorch, transformers and open_clip. `scout_ai_up.sh` builds it when missing. |
 | `docker/Dockerfile` | The `scout-ros` image. Its base image `fetch-ros` only exists on the Pi, so other machines load the exported image instead of building. |
@@ -34,7 +35,7 @@ files in `~/fetch_ws` are symlinks into this folder.
 ~/scout_up.sh --nav
 ```
 
-Quest: ROS IP `172.20.10.10`, port `10000`. Foxglove: `ws://172.20.10.10:8765`.
+Quest: ROS IP = the Pi's address, port `10000`; Foxglove: `ws://<Pi address>:8765`. `scout_up.sh` prints the address when it finishes (`172.20.10.3` on Sat evening, `172.20.10.10` before that; the phone decides).
 
 Drive the mission by publishing words on `/voice/text` (`start`, `stop`, `return`, `manual`, `capture`, `resume`):
 
@@ -121,8 +122,8 @@ This fallback has not been tested with two machines.
 
 ## Known gaps
 
-- No GPU container for the Jetson yet, so the AI runs on the CPU everywhere. `nanoowl_trt` is still a stub.
-- No Whisper node: `/voice/audio` from the Quest has no consumer.
+- The Jetson has a GPU image (`pi/jetson/Dockerfile.gpu`) and a TensorRT detector (`nanoowl_trt`, see HANDOFF.md session 9). The Pi runs the AI on the CPU.
+- The Whisper node (`/voice/audio` -> `/voice/text`, started by `scout_ai_up.sh`) has only been tested with synthetic speech.
 - No ESP32 bridge: nothing drives the motors and nothing publishes the real `/sensors`.
 - The `/species` JSON is not in `AGENTS.md` yet (shape in `HANDOFF.md`, section 5).
 - TF offsets in `scout_bringup.launch.py` are placeholders (`laser` z 0.15, `camera` x 0.08 z 0.10).

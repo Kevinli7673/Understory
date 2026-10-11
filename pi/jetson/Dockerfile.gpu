@@ -1,0 +1,20 @@
+# scout-ros-ai-gpu: scout-ros plus CUDA PyTorch, OWL-ViT (transformers) and BioCLIP (open_clip).
+# For the Jetson Orin Nano on JetPack 7.2 (L4T R39, Ubuntu 24.04, driver CUDA 13.2). JetPack 7 runs the
+# upstream aarch64 (SBSA) CUDA wheels, and they bring their own CUDA + cuDNN libraries through pip, so
+# nothing has to be installed on the host. Needs the nvidia Docker runtime.
+#
+#   docker build -t scout-ros-ai-gpu -f pi/jetson/Dockerfile.gpu pi/jetson
+#   AI_IMAGE=scout-ros-ai-gpu AI_RUNTIME=nvidia pi/jetson/jetson_up.sh
+FROM scout-ros
+ENV NVIDIA_VISIBLE_DEVICES=all NVIDIA_DRIVER_CAPABILITIES=all
+RUN apt-get update && apt-get install -y python3-pip && rm -rf /var/lib/apt/lists/*
+# long timeout + retries: the CUDA wheels are about 3 GB and the hotspot stalls
+RUN echo 'numpy<2' > /tmp/constraints.txt \
+ && pip3 install --no-cache-dir --break-system-packages --default-timeout=180 --retries 15 -c /tmp/constraints.txt \
+      --index-url https://download.pytorch.org/whl/cu132 torch torchvision \
+ && pip3 install --no-cache-dir --break-system-packages --default-timeout=180 --retries 15 -c /tmp/constraints.txt \
+      transformers open_clip_torch
+# TensorRT for the nanoowl_trt detector backend (SBSA aarch64 wheels, same CUDA 13 libraries as torch),
+# and onnx + onnxscript for exporting the OWL-ViT image encoder (pi/scripts/build_owl_engine.py).
+RUN pip3 install --no-cache-dir --break-system-packages --default-timeout=180 --retries 15 -c /tmp/constraints.txt \
+      tensorrt-cu13 onnx onnxscript
