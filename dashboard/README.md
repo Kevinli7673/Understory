@@ -22,12 +22,12 @@ in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
   folders on the laptop.
 - **Neon**: shown when `DATABASE_URL` is in `.env`. If Neon can't be reached the app drops back to the folders.
 
-## Pages
+## Page
 
-| Tab | What |
-| --- | --- |
-| Survey | Counts; floor plan (LiDAR map from `map.pgm`/`map.yaml`) with pins, bubbles, robot path and, when the robot is running, the **live LiDAR scan** and robot pose (refreshes every second); **live headset view**; pins per species; pin table |
-| Sensors | Temperature, pressure and air quality only: heat map (mean per grid cell) over the floor plan, plus value over time. Missing sensors are skipped, not zero |
+One page: the live headset view across the top, then counts, the survey map (LiDAR map from `map.pgm`/`map.yaml`
+with pins, bubbles, robot path and, when the robot is running, the live LiDAR scan and robot pose, refreshed
+every second), pins per species and the pin table. The sidebar has the site description and the mission picker.
+Sensor readings are still synced to Neon (`readings`) but not shown.
 
 ## Live: headset view + LiDAR
 

@@ -23,41 +23,35 @@ import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mission_io import SENSOR_KEYS, bin_readings, load_mission, map_extent  # noqa: E402
+from mission_io import SENSOR_KEYS, load_mission, map_extent  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 load_dotenv(REPO / '.env')
 
 # Colors per theme: only the Eucalyptus / Mist / Plaster / Soot / Moss palette (and lighter/darker steps of it).
-# Plant markers are told apart by lightness and shape, not hue: invasive = dark Soot ✕, native = Eucalyptus dot,
-# removed = Mist dot, new = Moss diamond. Keep in sync with .streamlit/config.toml.
+# Plant markers are told apart by lightness and shape, not hue: invasive = dark Soot ✕, native = Eucalyptus dot.
+# Keep in sync with .streamlit/config.toml.
 EUCALYPTUS, MIST, PLASTER, SOOT, MOSS = '#98aa9d', '#b3c9d6', '#f2efe2', '#2d3536', '#697c70'
 PALETTES = {
     'light': {
-        'native': EUCALYPTUS, 'native_line': MOSS, 'invasive': SOOT, 'removed': MIST, 'removed_line': '#6b93b0',
-        'new': MOSS, 'side_text': SOOT, 'side_card': 'rgba(242,239,226,0.55)', 'side_tag': (SOOT, PLASTER), 'lidar': '#4c7698', 'lidar_fill': 'rgba(179,201,214,0.35)', 'robot': SOOT, 'text': SOOT, 'muted': '#5b6661', 'faint': '#8a948e', 'border': '#dcd8c8',
+        'native': EUCALYPTUS, 'native_line': MOSS, 'invasive': SOOT,
+        'lidar': '#4c7698', 'lidar_fill': 'rgba(179,201,214,0.35)', 'robot': SOOT,
+        'side_text': SOOT, 'side_card': 'rgba(242,239,226,0.55)', 'side_tag': (SOOT, PLASTER),
+        'text': SOOT, 'muted': '#5b6661', 'faint': '#8a948e', 'border': '#dcd8c8',
         'card': '#faf8f1', 'surface': PLASTER, 'accent': '#55675c',
-        'grid': 'rgba(45,53,54,0.08)', 'fill': 'rgba(152,170,157,0.22)', 'line': MOSS,
         'wall': (45, 53, 54, 235), 'floor': (251, 250, 245, 255), 'unknown': (231, 228, 213, 255),
-        'seq': ['#e6edf1', '#cbdbe4', '#b3c9d6', '#8fb0c6', '#6b93b0', '#4c7698', '#355a78'],  # Mist ramp
     },
     'dark': {
-        'native': EUCALYPTUS, 'native_line': '#c9d6cc', 'invasive': PLASTER, 'removed': MIST, 'removed_line': '#d7e4ec',
-        'new': EUCALYPTUS, 'side_text': PLASTER, 'side_card': 'rgba(242,239,226,0.06)', 'side_tag': (EUCALYPTUS, SOOT), 'lidar': MIST, 'lidar_fill': 'rgba(179,201,214,0.16)', 'robot': PLASTER, 'text': PLASTER, 'muted': '#b9c2bb', 'faint': '#8a968f', 'border': '#435051',
+        'native': EUCALYPTUS, 'native_line': '#c9d6cc', 'invasive': PLASTER,
+        'lidar': MIST, 'lidar_fill': 'rgba(179,201,214,0.16)', 'robot': PLASTER,
+        'side_text': PLASTER, 'side_card': 'rgba(242,239,226,0.06)', 'side_tag': (EUCALYPTUS, SOOT),
+        'text': PLASTER, 'muted': '#b9c2bb', 'faint': '#8a968f', 'border': '#435051',
         'card': '#343d3e', 'surface': SOOT, 'accent': EUCALYPTUS,
-        'grid': 'rgba(242,239,226,0.07)', 'fill': 'rgba(152,170,157,0.16)', 'line': EUCALYPTUS,
         'wall': (230, 226, 210, 230), 'floor': (54, 64, 66, 255), 'unknown': (47, 56, 57, 255),
-        'seq': ['#3b4a52', '#3f5a6e', '#4c7698', '#6b93b0', '#8fb0c6', '#b3c9d6', '#d7e4ec'],
     },
 }
 FONT = 'Inter, -apple-system, "Segoe UI", sans-serif'
 DISPLAY = '"Space Grotesk", Inter, -apple-system, sans-serif'
-SENSOR_NAMES = {
-    'temp_c': 'Temperature (°C)', 'pressure_hpa': 'Pressure (hPa)', 'soil_moisture': 'Soil moisture (raw)',
-    'light': 'Light (raw)', 'uv': 'UV index', 'air_quality': 'Air quality (raw)', 'sound': 'Sound (raw)',
-}
-SENSORS_SHOWN = ['temp_c', 'pressure_hpa', 'air_quality']
-
 # Live feeds come through dashboard/live_relay.py. The dashboard server polls it for the newest LiDAR scan; the
 # viewer's browser opens the headset WebSocket itself (default: same host as this page, port 8770).
 RELAY_HTTP = os.environ.get('LIVE_RELAY_URL', 'http://localhost:8770').rstrip('/')
@@ -287,7 +281,9 @@ def map_figure(mission, height=560):
         fig.update_yaxes(range=[y0, y1])
     fig.update_xaxes(title='x (m)')
     fig.update_yaxes(title='y (m)', scaleanchor='x', scaleratio=1)
-    return style(fig, height)
+    style(fig, height)
+    fig.update_layout(margin=dict(l=56, r=8, t=8, b=44))  # room for the x-axis numbers
+    return fig
 
 
 def add_path(fig, readings):
@@ -317,29 +313,6 @@ def add_pins(fig, pins, name, color, symbol, size=13, outline=None):
         customdata=[[p['pin_id'], p['label'], p.get('confidence') or 0] for p in pins],
         hovertemplate='<b>%{customdata[1]}</b><br>%{customdata[0]} · confidence %{customdata[2]:.2f}'
                       '<br>(%{x:.2f}, %{y:.2f}) m<extra></extra>'))
-
-
-def heat_figure(mission, key, cell_m):
-    cells = bin_readings(mission['readings'], key, cell_m)
-    fig = map_figure(mission, height=600)
-    if cells:
-        ixs = [c[0] for c in cells]
-        iys = [c[1] for c in cells]
-        xs = np.arange(min(ixs), max(ixs) + 1)
-        ys = np.arange(min(iys), max(iys) + 1)
-        z = np.full((len(ys), len(xs)), np.nan)
-        for (ix, iy), v in cells.items():
-            z[iy - ys[0], ix - xs[0]] = v
-        seq = P['seq']
-        fig.add_trace(go.Heatmap(
-            x=(xs + 0.5) * cell_m, y=(ys + 0.5) * cell_m, z=z, opacity=0.92, name=SENSOR_NAMES[key],
-            colorscale=[[i / (len(seq) - 1), c] for i, c in enumerate(seq)], xgap=3, ygap=3,
-            colorbar=dict(title=dict(text=SENSOR_NAMES[key], font=dict(size=12, color=P['muted'])), thickness=10,
-                          outlinewidth=0, tickfont=dict(size=11, color=P['faint'])),
-            hovertemplate=f'<b>%{{z:.2f}}</b> {SENSOR_NAMES[key]}<br>cell centre (%{{x:.2f}}, %{{y:.2f}}) m<extra></extra>'))
-    add_bubbles(fig, mission['bubbles'])
-    fig.update_layout(showlegend=False)
-    return fig
 
 
 def fmt_time(t):
@@ -512,38 +485,6 @@ def page_overview(mission):
         'confidence': st.column_config.ProgressColumn('Confidence', min_value=0, max_value=1, format='%.2f')})
 
 
-def page_sensors(mission):
-    readings = mission['readings']
-    present = [k for k in SENSORS_SHOWN if any(k in r for r in readings)]
-    if not present:
-        st.info('No temperature, pressure or air-quality readings in this mission.')
-        return
-    c1, c2 = st.columns([2, 1], gap='medium')
-    key = c1.selectbox('Sensor', present, format_func=SENSOR_NAMES.get)
-    cell = c2.select_slider('Cell size (m)', [0.25, 0.5, 1.0], value=0.5)
-    vals = [r[key] for r in readings if key in r]
-    c = st.columns(4)
-    c[0].metric('Readings', f'{len(vals)} of {len(readings)}')
-    c[1].metric('Min', f'{min(vals):.2f}')
-    c[2].metric('Mean', f'{np.mean(vals):.2f}')
-    c[3].metric('Max', f'{max(vals):.2f}')
-    with st.container(border=True):
-        section(f'{SENSOR_NAMES[key]} across the site', f'Mean of the readings in each {cell} m cell; '
-                'darker is higher. Readings without this sensor are skipped.')
-        chart(heat_figure(mission, key, cell))
-    with st.container(border=True):
-        series = pd.DataFrame([{'time': pd.to_datetime(r['t'], unit='s'), key: r[key]} for r in readings if key in r])
-        line = go.Figure(go.Scatter(
-            x=series['time'], y=series[key], mode='lines', line=dict(color=P['line'], width=2.5, shape='spline'),
-            fill='tozeroy', fillcolor=P['fill'],
-            hovertemplate='%{x|%H:%M:%S}<br><b>%{y:.2f}</b><extra></extra>'))
-        style(line, 260, f'{SENSOR_NAMES[key]} over time')
-        lo, hi = min(vals), max(vals)
-        pad = (hi - lo) * 0.15 or 1
-        line.update_yaxes(range=[lo - pad, hi + pad], showgrid=True, gridcolor=P['grid'])
-        chart(line)
-
-
 # ---------- main ----------
 
 def main():
@@ -597,11 +538,7 @@ def main():
   <span class="us-chip soot">Mission {mid}</span><span class="us-chip">{fmt_time(mission['started_at'])}</span><span class="us-chip mist">{source}</span>
 </div>""", unsafe_allow_html=True)
 
-    tabs = st.tabs(['Survey', 'Sensors'])
-    with tabs[0]:
-        page_overview(mission)
-    with tabs[1]:
-        page_sensors(mission)
+    page_overview(mission)
 
 
 main()

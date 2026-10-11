@@ -58,8 +58,7 @@ def test_app_renders_on_fake_data(monkeypatch):
     monkeypatch.setenv('LIVE_RELAY_URL', 'http://127.0.0.1:9')  # nothing listens: live panels show offline
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert [t.label for t in at.tabs] == ['Survey', 'Sensors']
+    assert len(at.tabs) == 0  # one page: no Sensors / Before-after / Similar tabs
     assert [m.label for m in at.metric][:4] == ['Plants pinned', 'Invasive', 'Species', 'Duration']
     assert any('LiDAR offline' in m.value for m in at.markdown)  # no relay running in tests
-    sensor_box = next(sb for sb in at.selectbox if sb.label == 'Sensor')
-    assert set(sensor_box.options) <= {'Temperature (°C)', 'Pressure (hPa)', 'Air quality (raw)'}
+    assert any('Live stream view of the headset' in m.value for m in at.markdown)
