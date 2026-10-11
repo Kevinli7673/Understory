@@ -90,7 +90,9 @@ fi
 if [ "$1" = "--nav" ]; then
   if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
     echo "Nav (slam + Nav2 + mission + panorama) already running."
-  elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
+  # Ask twice: fresh discovery (--no-daemon) and the ROS daemon's list. Each has missed a running stack once:
+  # the daemon on Sat 7:50 PM, fresh discovery on Sat 8:32 PM while the hotspot dropped packets for a minute.
+  elif { in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6"; in_scout "timeout 5 ros2 node list"; } 2>/dev/null | grep -q slam_toolbox; then
     warn "slam_toolbox is already running on another machine (the Jetson?). Not starting a second one."
   else
     echo "Starting slam + Nav2 + mission + panorama..."
@@ -110,6 +112,10 @@ for topic in /scan /camera/image/compressed; do
   else warn "$topic is NOT publishing"; fi
 done
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
+  # the check before starting can miss the other machine; a name listed twice means two stacks are on the network
+  if [ "$(in_scout "timeout 5 ros2 node list" 2>/dev/null | grep -c '^/slam_toolbox$')" -gt 1 ]; then
+    warn "TWO slam_toolbox nodes on the network (this Pi and the Jetson). Stop this one now: ~/scout_down.sh --keep && ~/scout_up.sh"
+  fi
   state=$(in_scout "timeout 5 ros2 topic echo /mission/state --once --field data 2>/dev/null" | head -1)
   if [ -n "$state" ]; then echo "  /mission/state: $state"; else warn "mission manager is NOT publishing /mission/state"; fi
   if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q Translation; then
@@ -127,7 +133,7 @@ done
 
 # files the container creates are root-owned; hand them back to the host user
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs
-# the address depends on which phone's hotspot the Pi joined (.10 on Alvaro's, .3 on Kevin's), so print the real one
-ip=$(grep -o '172\.20\.10\.[0-9]*' <<<"$ips" | head -1); ip=${ip:-THIS_MACHINE}
-echo "Done. Quest: ROS IP $ip port 10000 | Foxglove: ws://$ip:8765 | shell: ~/scout_shell.sh"
+# the phone hands out the address, and it changes (.10 on Saturday afternoon, .3 that evening): print the real one
+MYIP=$(tr ' ' '\n' <<<"$ips" | grep -m1 '^172\.20\.10\.'); MYIP=${MYIP:-<Pi address>}
+echo "Done. Quest: ROS IP $MYIP port 10000 | Foxglove: ws://$MYIP:8765 | shell: ~/scout_shell.sh"
 echo "Plant AI on this machine (slow on the Pi, about 1 frame every 4 s): ~/scout_ai_up.sh"
