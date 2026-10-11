@@ -4,7 +4,8 @@
 
 Reads from Neon when DATABASE_URL is set (after sync.py), otherwise straight from mission folders
 (MISSIONS_DIR, default missions/ then fake_data/missions/). The folder path is the offline fallback:
-it needs no internet.
+it needs no internet. With HF_DATASET_REPO set, "Hugging Face" downloads the dataset that sync.py and
+amd/hub.py fill and reads it the same way as local folders (the last download is kept for offline use).
 """
 import base64
 import math
@@ -59,6 +60,21 @@ def local_mission(root, mid):
     m['map_source'] = str(Path(m['dir']) / m['map']['image']) if m['map'] else None
     m['asset_base'] = m['dir'] + '/'
     return m
+
+
+def hf_cache_dir(repo):
+    base = os.environ.get('HF_MISSIONS_CACHE') or Path.home() / '.cache' / 'understory' / 'hf_missions'
+    return Path(base) / repo.replace('/', '__')
+
+
+@st.cache_data(ttl=300)
+def hf_root(repo):
+    """Download the dataset (only files that changed) and return the folder. A private dataset needs HF_TOKEN."""
+    from huggingface_hub import snapshot_download
+    dest = hf_cache_dir(repo)
+    snapshot_download(repo_id=repo, repo_type='dataset', token=os.environ.get('HF_TOKEN') or None,
+                      local_dir=str(dest), ignore_patterns=['*.splat', '*.ply'])
+    return str(dest)
 
 
 def db_connect():
@@ -383,9 +399,28 @@ def main():
     st.title('Understory survey')
     with st.sidebar:
         has_db = bool(os.environ.get('DATABASE_URL'))
-        choice = st.radio('Data source', ['Neon', 'Mission folders'] if has_db else ['Mission folders'],
-                          help='Mission folders work offline (pre-synced fallback).')
+        hf_repo = os.environ.get('HF_DATASET_REPO')
+        choice = st.radio('Data source',
+                          (['Neon'] if has_db else []) + ['Mission folders'] + (['Hugging Face'] if hf_repo else []),
+                          help='Mission folders work offline (pre-synced fallback). '
+                               'Hugging Face is the dataset sync.py uploads to.')
         use_db = choice == 'Neon'
+        root = None
+        if choice == 'Hugging Face':
+            st.caption(f'Dataset: [{hf_repo}](https://huggingface.co/datasets/{hf_repo})')
+            if st.button('Download again'):
+                hf_root.clear()
+                local_mission_ids.clear()
+                local_mission.clear()
+            try:
+                with st.spinner('Downloading from Hugging Face...'):
+                    root = hf_root(hf_repo)
+            except Exception as e:  # venue internet is not guaranteed
+                if hf_cache_dir(hf_repo).is_dir():
+                    st.warning(f'Hugging Face unreachable, showing the last download. ({e.__class__.__name__})')
+                    root = str(hf_cache_dir(hf_repo))
+                else:
+                    st.error(f'Hugging Face unreachable, using mission folders. ({e.__class__.__name__})')
         if use_db:
             try:
                 mission_ids = db_mission_ids()
@@ -393,8 +428,9 @@ def main():
                 st.error(f'Neon unreachable, using mission folders. ({e.__class__.__name__})')
                 use_db = False
         if not use_db:
-            root = str(local_root())
-            st.caption(f'Folder: `{root}`')
+            if root is None:
+                root = str(local_root())
+                st.caption(f'Folder: `{root}`')
             mission_ids = local_mission_ids(root) if Path(root).is_dir() else []
         if not mission_ids:
             st.warning('No missions found.')

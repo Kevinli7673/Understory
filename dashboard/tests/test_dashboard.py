@@ -58,3 +58,42 @@ def test_app_renders_on_fake_data(monkeypatch):
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
     assert any('7 invasive plants found → 1 remaining' in m.value for m in at.markdown)
+
+
+def test_app_reads_the_hugging_face_dataset(monkeypatch, tmp_path):
+    """The Hugging Face source downloads the dataset and reads it like mission folders. No network here."""
+    import shutil
+
+    import huggingface_hub
+    from streamlit.testing.v1 import AppTest
+    calls = []
+
+    def fake_download(repo_id, local_dir, **kwargs):
+        calls.append((repo_id, kwargs.get('repo_type')))
+        shutil.copytree(FAKE, local_dir, dirs_exist_ok=True)
+        return local_dir
+
+    monkeypatch.setattr(huggingface_hub, 'snapshot_download', fake_download)
+    monkeypatch.delenv('DATABASE_URL', raising=False)
+    monkeypatch.setenv('MISSIONS_DIR', str(tmp_path / 'empty'))
+    monkeypatch.setenv('HF_DATASET_REPO', 'someone/understory-missions')
+    monkeypatch.setenv('HF_MISSIONS_CACHE', str(tmp_path / 'cache'))
+    at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
+    at.sidebar.radio[0].set_value('Hugging Face').run()
+    assert not at.exception, at.exception
+    assert calls == [('someone/understory-missions', 'dataset')]
+    assert any('7 invasive plants found → 1 remaining' in m.value for m in at.markdown)
+
+
+def test_sync_without_neon_uploads_to_hugging_face_only(monkeypatch, capsys):
+    import sync
+    uploaded = []
+    monkeypatch.setattr(sync, 'load_dotenv', lambda *a, **k: None)
+    monkeypatch.setattr(sync, 'upload_to_hf', lambda mission, repo, public=False: uploaded.append(
+        (mission['mission_id'], repo, public)) or 'https://example.invalid/m1/')
+    monkeypatch.delenv('DATABASE_URL', raising=False)
+    monkeypatch.setenv('HF_DATASET_REPO', 'someone/understory-missions')
+    monkeypatch.setattr(sys, 'argv', ['sync.py', str(FAKE / 'm1')])
+    sync.main()
+    assert uploaded == [('m1', 'someone/understory-missions', False)]
+    assert 'nothing goes to Neon' in capsys.readouterr().out

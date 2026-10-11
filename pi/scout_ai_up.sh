@@ -22,12 +22,16 @@
 #   AI_ONE_PROCESS=1             detector and species in one process (ai_node, log in ai.log). Use it on the Jetson GPU:
 #                                it needs about 1.6 GB instead of 3.5 GB, and the two models never peak together.
 #   SCOUT_PEER=<other machine's IP>   same meaning as in scout_up.sh
+#   CAMERA_TOPIC=/camera/image/throttled   the detector, species and localizer nodes read this topic instead of
+#                                /camera/image/compressed. For a weak link to the camera's machine, which must be
+#                                running pi/scripts/camera_throttle.py
 
 AI_IMAGE=${AI_IMAGE:-scout-ros-ai}
 DET=${DETECTOR_BACKEND:-owlvit_torch}
 SPEC=${SPECIES_BACKEND:-bioclip}
 THRESH=${DETECTOR_THRESHOLD:-0.05}
 THREADS=${AI_THREADS:-2}
+CAM=${CAMERA_TOPIC:+-r /camera/image/compressed:=$CAMERA_TOPIC}
 [ -n "$AI_ONE_PROCESS" ] && DLOG=ai SLOG=ai || DLOG=detector SLOG=species
 WHISPER=${WHISPER_MODEL:-openai/whisper-base.en}
 [ "${WHISPER_DEVICE:-cpu}" = cpu ] && WHISPER_ENV='export CUDA_VISIBLE_DEVICES= &&' || WHISPER_ENV=
@@ -84,12 +88,12 @@ start() {   # start <process pattern> <log name> <command>
 if [ "$1" = "--voice-only" ]; then
   :
 elif [ -n "$AI_ONE_PROCESS" ]; then
-  start ai_node ai "ros2 run scout_perception ai_node --ros-args -p detector_node:backend:=$DET -p detector_node:score_threshold:=$THRESH -p species_node:backend:=$SPEC"
+  start ai_node ai "ros2 run scout_perception ai_node --ros-args -p detector_node:backend:=$DET -p detector_node:score_threshold:=$THRESH -p species_node:backend:=$SPEC $CAM"
 else
-  start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH"
-  start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC"
+  start detector_node detector "ros2 run scout_perception detector_node --ros-args -p backend:=$DET -p score_threshold:=$THRESH $CAM"
+  start species_node species "ros2 run scout_perception species_node --ros-args -p backend:=$SPEC $CAM"
 fi
-[ "$1" = "--voice-only" ] || start localizer_node localizer "ros2 run scout_perception localizer_node"
+[ "$1" = "--voice-only" ] || start localizer_node localizer "ros2 run scout_perception localizer_node${CAM:+ --ros-args $CAM}"
 if [ "$WHISPER" != none ]; then
   # Whisper has its own offline switch, so a missing voice model never forces the plant models online
   PLANT_OFFLINE=$OFFLINE; OFFLINE=

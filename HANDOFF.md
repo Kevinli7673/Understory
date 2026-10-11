@@ -1,6 +1,6 @@
 # Understory handoff: Pi + Jetson (perception, bringup, AI)
 
-Written Sat Oct 10 2026, last updated about 8:40 PM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
+Written Sat Oct 10 2026, last updated Sun Oct 11 about 2:00 AM EDT, on the Jetson. **Submission is Sun Oct 11, 9:30 AM EDT.**
 
 This file is for Alvaro (perception lead) and for any coding agent picking the work up on either the
 Raspberry Pi or the Jetson Orin Nano. It covers what exists, what was tested and how, how to run it,
@@ -33,7 +33,9 @@ follow the rules in section 12.
 | NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
 | Mission logger (`logger_node`) | Works with fake data; live pins and crops written Sat night | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). Live: 12 pins and crops in `missions/m1`, all false alarms, no bubble captured yet (session 10, continued) |
 | AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
-| Dashboard, Neon sync | Not in the repo | other owners |
+| Dashboard | Runs on the Jetson, `http://<Jetson IP>:8501` (`dashboard/run.sh`) | Sun 1:40 AM: 8 tests pass; the folder source and the Hugging Face source both rendered (session 12) |
+| Hugging Face dataset `a1vcm/understory-missions` (private) | Holds the two **fake** missions m1 and m2 | uploaded Sat 11:40 PM; downloaded by the dashboard Sun 1:40 AM |
+| Neon sync | **Not run**: no `DATABASE_URL` in `.env` | |
 
 The short version: **the full perception chain now runs on the Pi alone, slowly.** A plant photo held
 in front of the camera becomes a pin about 12 to 15 seconds later. The Jetson's job is to run the same
@@ -659,6 +661,18 @@ installed on it."*
 - **The Pi was rebooted at 11:39 PM (during that outage) and came up with its own mapping stack** (`scout_nav.launch.py`: slam_toolbox, Nav2, mission manager, twist_mux, logger, `pose_from_tf`), so at 11:55 PM every one of those names was on the network twice and two twist_mux nodes fed the ESP32 bridge. **The Jetson's copy was stopped at 11:57 PM**, because the Pi's was the newer one and somebody may be working there. After that: no name twice, one `/cmd_vel` publisher, `/mission/state` `IDLE`, `/pose` 9.5 Hz. **Mapping now runs on the Pi and missions are logged on the Pi** (`~/fetch_ws/missions` there). To move mapping back to the Jetson: on the Pi `~/scout_down.sh --keep && ~/scout_up.sh`, then on the Jetson `~/start_understory.sh`. Whisper was not running on the Pi after its reboot.
 - **The Pi's GitHub login stopped working at about 11:50 PM** (`gh auth status`: "The token in hosts.yml is invalid"), so nothing can be pushed from the Jetson or the Pi until someone runs `gh auth login` on the Pi. Branch `hf-hub-handoff` is in the Pi's clone and on the Jetson, not on GitHub.
 
+**Session 12, Sun 1:30 to 2:00 AM, on the Jetson.** *"The Pi is connected again, continue on and implement the dashboard and run everything and implement the Hugging Face."* The Jetson had rebooted at 1:21 AM. The Pi is at `172.20.10.3` on "iPhone (2)", had restarted its own `scout_up.sh --nav` stack at 1:30 AM with the ESP32 and LiDAR plugged in and the Quest connected, and has staged, uncommitted work on `pi-session-11` (bridge `--trim`/`--strafe-fix`, `slam_toolbox_pi.yaml`). **Mapping, Nav2, the mission manager, panorama and the logger stay on the Pi.** Nothing in the Pi's clone was touched.
+- **Dashboard runs on the Jetson:** `dashboard/run.sh` (new) serves it at `http://172.20.10.4:8501` for any laptop on the hotspot; `--stop` stops it; log in `~/fetch_ws/logs/dashboard.log`. It is not started by `~/start_understory.sh`. `dashboard/.venv` was built without sudo (`dashboard/README.md` has the steps). It uses about 150 MB. **Open it from a laptop, not from a browser on the Jetson** (the memory guard, session 10).
+- **Dashboard, new data source "Hugging Face"** (sidebar, shown when `HF_DATASET_REPO` is in `.env`): downloads the dataset to `~/.cache/understory/hf_missions/` and reads it like mission folders, so all four tabs work with no Neon. Done for real at 1:40 AM against the private dataset: 155 files, 71 s over the hotspot the first time, then m1 and m2 listed and "7 invasive plants found -> 1 remaining". With no internet it shows the last download. 2 new tests (8 pass).
+- **`dashboard/sync.py` without `DATABASE_URL` now uploads to Hugging Face only** instead of exiting, and creates the dataset private unless `--public` (it used to create it public). Tested with a fake uploader only; the real upload path is the same call `amd/hub.py upload` made on Saturday.
+- **What the dashboard shows by default** is `~/fetch_ws/missions` on the Jetson: `m1` (one bubble taken at 12:45 AM from a table top, 2 pins that are not plants) and `m1_false_alarms_sat`. **Neither is a real survey.** For the fake before/after demo choose "Hugging Face", or start with `MISSIONS_DIR=fake_data/missions dashboard/run.sh`.
+- **Missions are logged on the Pi while the Pi maps.** After a real survey: `rsync -a a1vcm@172.20.10.3:fetch_ws/missions/ ~/fetch_ws/missions/` on the Jetson (move the Jetson's test `m1` away first), then `dashboard/.venv/bin/python dashboard/sync.py ~/fetch_ws/missions/<id>`. **The dataset's `m1/` and `m2/` are the fake missions; a real `m1` uploaded on top would mix with them.** Delete those two folders on the dataset page first, or record the real missions under other ids.
+- **The hotspot is on 2.4 GHz (channel 11) and cannot carry the camera to the Jetson.** With the Jetson's AI subscribed to `/camera/image/compressed`, ping to the Pi went to 0.2 to 2.2 s, the camera arrived at 2 Hz, and `/pose` and `/mission/state` did not arrive; 20 s after the AI was stopped ping was 25 ms. One trial each way. On Saturday at 10 PM the same phone carried 15 Hz.
+- **Workaround, running now: `pi/scripts/camera_throttle.py`** (new) on the Pi republishes 3 frames a second on `/camera/image/throttled`, and `CAMERA_TOPIC=/camera/image/throttled ~/start_understory.sh` makes the detector, species and localizer nodes read that topic (`scout_ai_up.sh`, new variable). Measured after: ping 45 ms, `/scan` 10.8 Hz, `/pose` 10.4 Hz, `/detections` 1.7 Hz, 2.8 GB available, no node name twice. The Quest and the panorama node still use the full-rate topic. **The throttle was started by hand from a copy in the Pi's `~/fetch_ws/logs/` and is gone after a Pi restart**: `docker exec -d scout bash -c "source /opt/ros/jazzy/setup.bash && python3 /fetch_ws/logs/camera_throttle.py > /fetch_ws/logs/camera_throttle.log 2>&1"`. **Better fix: put the phone's hotspot on 5 GHz** ("Maximize Compatibility" off), reconnect both machines, and run `~/start_understory.sh` without `CAMERA_TOPIC`.
+- At 1:32 AM the Jetson saw none of the Pi's nodes for about three minutes although ping, UDP unicast and multicast worked both ways and the Pi's discovery packets were arriving; it then saw all 41 without any change. Cause not found.
+- Not tested: a plant in front of the camera with the 3 Hz feed; a pin written by the Pi's logger from the Jetson's localizer; Whisper with a human voice (the node was started on the Pi at 1:32 AM).
+- **Not pushed.** The Pi's GitHub login is still invalid; branch `hf-hub-handoff` is on the Jetson and in the Pi's clone.
+
 ## 12. Rules for anyone (or any agent) continuing
 
 - **Commits carry no Claude attribution.** No `Co-Authored-By`, no "Generated with" footer. Commit
@@ -690,6 +704,8 @@ sudo nmcli con up hotspot     # if it fell back to eduroam
 date                          # check after every reboot
 
 # ---- Jetson host ----
+~/fetch_ws/src/Understory/dashboard/run.sh    # dashboard at http://<Jetson IP>:8501 (--stop to stop it)
+CAMERA_TOPIC=/camera/image/throttled ~/start_understory.sh   # weak hotspot: the Pi must run camera_throttle.py
 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 NO_AI=1 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh

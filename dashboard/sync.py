@@ -1,10 +1,13 @@
 """Upload a mission folder to the cloud: images to an HF Hub dataset, rows to Neon. Safe to re-run (upserts).
 
-    python dashboard/sync.py missions/m1 [missions/m2 ...] [--no-hf] [--embed] [--dry-run]
+    python dashboard/sync.py missions/m1 [missions/m2 ...] [--no-hf] [--public] [--embed] [--dry-run]
 
 Env (.env at the repo root): DATABASE_URL (Neon), HF_TOKEN, HF_DATASET_REPO (e.g. "knight-hacks/understory").
+Without DATABASE_URL only the Hugging Face upload runs; the dashboard's "Hugging Face" data source reads it.
 --no-hf skips the upload; crop/map URLs are then left null and the dashboard can only show images
 when it runs next to the mission folders.
+The dataset is created private unless --public is given: frames show whoever stood near the robot. Image
+URLs stored in Neon only open in a browser when the dataset is public.
 --embed fills missing pin embeddings with BioCLIP on crops/<pin_id>.jpg (needs open_clip_torch).
 """
 import argparse
@@ -40,10 +43,10 @@ def map_png_bytes(mission):
     return buf.getvalue()
 
 
-def upload_to_hf(mission, repo):
+def upload_to_hf(mission, repo, public=False):
     from huggingface_hub import HfApi
     api = HfApi(token=os.environ.get('HF_TOKEN'))
-    api.create_repo(repo, repo_type='dataset', exist_ok=True, private=False)
+    api.create_repo(repo, repo_type='dataset', exist_ok=True, private=not public)
     mid = mission['mission_id']
     api.upload_folder(repo_id=repo, repo_type='dataset', folder_path=str(mission['dir']),
                       path_in_repo=mid, allow_patterns=HF_PATTERNS,
@@ -144,6 +147,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('missions', nargs='+', type=Path)
     parser.add_argument('--no-hf', action='store_true', help='skip the HF Hub upload')
+    parser.add_argument('--public', action='store_true', help='create the HF dataset public (default private)')
     parser.add_argument('--embed', action='store_true', help='BioCLIP embeddings for pins that lack one')
     parser.add_argument('--dry-run', action='store_true', help='read and summarize, write nothing')
     args = parser.parse_args()
@@ -151,14 +155,16 @@ def main():
     load_dotenv(Path(__file__).resolve().parent.parent / '.env')
     db_url = os.environ.get('DATABASE_URL')
     repo = os.environ.get('HF_DATASET_REPO')
-    if not args.dry_run and not db_url:
-        sys.exit('DATABASE_URL is not set (put it in .env)')
     if not args.dry_run and not args.no_hf and not repo:
         sys.exit('HF_DATASET_REPO is not set; set it in .env or pass --no-hf')
+    if not args.dry_run and not db_url:
+        if args.no_hf:
+            sys.exit('DATABASE_URL is not set (put it in .env) and --no-hf was given: nothing to do')
+        print('DATABASE_URL is not set: uploading to Hugging Face only, nothing goes to Neon')
 
     embedder = Embedder() if args.embed else None
     conn = None
-    if not args.dry_run:
+    if not args.dry_run and db_url:
         import psycopg
         conn = psycopg.connect(db_url)
 
@@ -173,11 +179,12 @@ def main():
               f"map={'yes' if mission['map'] else 'no'}")
         if args.dry_run:
             continue
-        base_url = None if args.no_hf else upload_to_hf(mission, repo)
+        base_url = None if args.no_hf else upload_to_hf(mission, repo, args.public)
         if base_url:
             print(f'  uploaded to {base_url}')
-        upsert(conn, mission, base_url)
-        print('  upserted into Neon')
+        if conn:
+            upsert(conn, mission, base_url)
+            print('  upserted into Neon')
 
     if conn:
         conn.close()
