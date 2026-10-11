@@ -609,6 +609,7 @@ installed on it."*
 - **Network, unresolved.** The Jetson is on "Alvaro's iPhone" (`172.20.10.11`). The Pi answered at neither `.10` nor `.3` for most of the session, was visible at `.3` from about 7:51 to 8:05 PM, then gone again. Both phones hand out `172.20.10.x`, so the Pi may be moving between them. Pi and Jetson must be on the same hotspot.
 - Left running at 8:20 PM on the Jetson: `ai_node` (TensorRT detector), localizer, `logger_node`, memory guard, power logger. Not running here: mapping, Nav2, mission, panorama (the Pi has them).
 - Not pushed: the Jetson has no GitHub login and the Pi could not be reached. `jetson-bringup` is ahead of `origin` by the merge and this session's commit.
+- **For Kevin: `splat/align.py` is an empty file on every branch**, and `mast3r_poses.py` imports `align_sim3`, `apply_to_points` and `apply_to_pose` from it. As it stands the MASt3R step fails at import, so `splat/run.sh` always falls through to the Depth Anything point cloud, and `python -m pytest splat/tests` fails to collect. Not touched (`splat/` is his).
 - Left on disk, safe to delete: `~/fetch_ws/logs/deep_test/` (the photo test mission).
 
 ## 12. Rules for anyone (or any agent) continuing
