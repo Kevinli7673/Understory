@@ -51,8 +51,9 @@ Check `HANDOFF.md` section 1 for the Pi/Jetson details. Owners as in "Components
   then stop `fake_sensors.py`.
 
 **Cloud and demo**
-- **`sync.py` + Neon + Streamlit dashboard** (Fullstack): not in the repo. Build against `fake_data/missions/m1` and
-  `m2` now (before/after: same label within 0.5 m → "7 found → 1 remaining").
+- **`sync.py` + Neon + Streamlit dashboard** (Fullstack): in `dashboard/`, works on `fake_data/missions/m1`/`m2`
+  from folders (offline). Not yet run against a real Neon DB / HF dataset (needs `.env`); pins need embeddings
+  (`publish_embedding:=true`, deep pass, or `sync.py --embed`) for similar-plant search.
 - **AMD on the W7900** (Teammate 3 / Kevin): `amd/deep_pass.py` and the splat (`splat/setup_amd.sh`, `run.sh`) have
   not run on ROCm yet. Splat output `splat/out/<id>/scene.splat` shows up in the Quest's "3D model" button.
 - **Devpost** (everyone): write-up, headset video (record the robot-free demo now as a backup), pitch.
