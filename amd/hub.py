@@ -1,8 +1,8 @@
 """Move a mission between machines through the Hugging Face dataset that dashboard/sync.py fills.
 
-The Jetson (or a laptop) uploads a mission folder with dashboard/sync.py. The W7900 box then needs no
-route to the Jetson:
+The W7900 box then needs no route to the Jetson:
 
+    python amd/hub.py upload missions/m1          # on the Jetson: the whole mission folder -> dataset
     python amd/hub.py pull m1                     # dataset -> missions/m1 (frames, map, bubbles, live pins)
     python amd/deep_pass.py missions/m1
     bash splat/run.sh missions/m1
@@ -11,6 +11,9 @@ route to the Jetson:
 Settings, from the environment or from .env at the repo root: HF_DATASET_REPO (for example
 "your-name/understory-missions") and HF_TOKEN. A public dataset can be pulled without a token; push needs
 one with write access. `--repo` overrides HF_DATASET_REPO.
+
+`upload` sends the same files to the same place as dashboard/sync.py, without needing Neon. It creates the
+dataset if it does not exist, PRIVATE unless --public is given: frames show whoever stood near the robot.
 """
 import argparse
 import os
@@ -59,6 +62,19 @@ def splat_uploads(mission_id, splat_dir):
     return found
 
 
+def upload(folder, repo, token, public):
+    from huggingface_hub import HfApi
+    folder = Path(folder)
+    mission_id = folder.name
+    if not (folder / 'bubbles.jsonl').is_file():
+        sys.exit(f'{folder}/bubbles.jsonl is missing: no bubble was captured in this mission')
+    api = HfApi(token=token)
+    api.create_repo(repo, repo_type='dataset', exist_ok=True, private=not public)
+    api.upload_folder(repo_id=repo, repo_type='dataset', folder_path=str(folder), path_in_repo=mission_id,
+                      allow_patterns=PULL + PUSH, commit_message=f'mission {mission_id}')
+    print(f'https://huggingface.co/datasets/{repo}/tree/main/{mission_id}')
+
+
 def pull(mission_id, repo, token, dest):
     from huggingface_hub import snapshot_download
     dest = Path(dest)
@@ -93,10 +109,11 @@ def push(folder, repo, token, splat_dir):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('action', choices=['pull', 'push'])
-    ap.add_argument('mission', help='pull: the mission id (m1). push: the mission folder (missions/m1)')
+    ap.add_argument('action', choices=['upload', 'pull', 'push'])
+    ap.add_argument('mission', help='pull: the mission id (m1). upload and push: the mission folder (missions/m1)')
     ap.add_argument('--repo', help='dataset repo; default HF_DATASET_REPO')
     ap.add_argument('--dest', default='missions', help='pull: where mission folders go (default missions/)')
+    ap.add_argument('--public', action='store_true', help='upload: create the dataset public (default private)')
     ap.add_argument('--splat-dir', help='push: folder with scene.splat (default splat/out/<id>)')
     args = ap.parse_args()
     repo = args.repo or setting('HF_DATASET_REPO')
@@ -105,9 +122,12 @@ def main():
     token = setting('HF_TOKEN')
     if args.action == 'pull':
         pull(args.mission, repo, token, args.dest)
+        return
+    if not token:
+        sys.exit(f'{args.action} needs HF_TOKEN (write access) in the environment or in .env')
+    if args.action == 'upload':
+        upload(args.mission, repo, token, args.public)
     else:
-        if not token:
-            sys.exit('push needs HF_TOKEN (write access) in the environment or in .env')
         mission_id = Path(args.mission).name
         push(args.mission, repo, token, args.splat_dir or REPO_ROOT / 'splat' / 'out' / mission_id)
 
