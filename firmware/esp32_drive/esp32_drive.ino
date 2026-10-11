@@ -32,9 +32,10 @@
 const uint8_t SHIELD_ADDR = 0x60;      // default address (solder jumpers change it)
 
 // Which shield port (M1..M4) drives each wheel, in order: front-left, front-right, rear-left, rear-right.
-const uint8_t WHEEL_PORT[4] = {1, 2, 3, 4};
+// Measured Sat night with "T n": FL on M2, FR on M3, RL on M1, RR on M4.
+const uint8_t WHEEL_PORT[4] = {2, 3, 1, 4};
 // Flip a wheel to -1 if it spins backwards when the robot is told to drive forward (C 0.1 0 0).
-const int8_t WHEEL_DIR[4] = {1, 1, 1, 1};
+const int8_t WHEEL_DIR[4] = {1, -1, -1, 1};
 
 const float MAX_WHEEL_SPEED = 0.35f;   // m/s a wheel rim reaches at full PWM (calibrate: drive 1 m, time it)
 const float K = 0.20f;                 // half wheelbase + half track width, meters (rotation lever arm)
