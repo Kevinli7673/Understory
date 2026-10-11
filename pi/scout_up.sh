@@ -90,7 +90,7 @@ fi
 if [ "$1" = "--nav" ]; then
   if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
     echo "Nav (slam + Nav2 + mission + panorama) already running."
-  elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
+  elif in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6" | grep -q slam_toolbox; then
     warn "slam_toolbox is already running on another machine (the Jetson?). Not starting a second one."
   else
     echo "Starting slam + Nav2 + mission + panorama..."
@@ -123,5 +123,7 @@ done
 
 # files the container creates are root-owned; hand them back to the host user
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs
-echo "Done. Quest: ROS IP 172.20.10.10 port 10000 | Foxglove: ws://172.20.10.10:8765 | shell: ~/scout_shell.sh"
+# the phone hands out the address, and it changes (.10 on Saturday afternoon, .3 that evening): print the real one
+MYIP=$(tr ' ' '\n' <<<"$ips" | grep -m1 '^172\.20\.10\.'); MYIP=${MYIP:-<Pi address>}
+echo "Done. Quest: ROS IP $MYIP port 10000 | Foxglove: ws://$MYIP:8765 | shell: ~/scout_shell.sh"
 echo "Plant AI on this machine (slow on the Pi, about 1 frame every 4 s): ~/scout_ai_up.sh"
