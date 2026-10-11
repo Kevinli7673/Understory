@@ -55,9 +55,13 @@ def test_app_renders_on_fake_data(monkeypatch):
     from streamlit.testing.v1 import AppTest
     monkeypatch.delenv('DATABASE_URL', raising=False)
     monkeypatch.setenv('MISSIONS_DIR', str(FAKE))
+    monkeypatch.setenv('LIVE_RELAY_URL', 'http://127.0.0.1:9')  # nothing listens: live panels show offline
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
+    assert len(at.tabs) == 0  # one page: no Sensors / Before-after / Similar tabs
+    assert [m.label for m in at.metric][:4] == ['Plants pinned', 'Invasive', 'Species', 'Duration']
+    assert any('LiDAR offline' in m.value for m in at.markdown)  # no relay running in tests
+    assert any('Live stream view of the headset' in m.value for m in at.markdown)
 
 
 def test_app_reads_the_hugging_face_dataset(monkeypatch, tmp_path):
@@ -78,11 +82,14 @@ def test_app_reads_the_hugging_face_dataset(monkeypatch, tmp_path):
     monkeypatch.setenv('MISSIONS_DIR', str(tmp_path / 'empty'))
     monkeypatch.setenv('HF_DATASET_REPO', 'someone/understory-missions')
     monkeypatch.setenv('HF_MISSIONS_CACHE', str(tmp_path / 'cache'))
+    monkeypatch.setenv('LIVE_RELAY_URL', 'http://127.0.0.1:9')
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     at.sidebar.radio[0].set_value('Hugging Face').run()
     assert not at.exception, at.exception
     assert calls == [('someone/understory-missions', 'dataset')]
-    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
+    assert at.sidebar.selectbox[0].options == ['m1', 'm2']
+    assert [m.value for m in at.metric][:2] == ['11', '7']
+    assert any('Hugging Face</span>' in m.value for m in at.markdown)
 
 
 def test_sync_without_neon_uploads_to_hugging_face_only(monkeypatch, capsys):
