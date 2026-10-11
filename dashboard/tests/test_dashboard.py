@@ -57,4 +57,4 @@ def test_app_renders_on_fake_data(monkeypatch):
     monkeypatch.setenv('MISSIONS_DIR', str(FAKE))
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert any('7 invasive plants found → 1 remaining' in m.value for m in at.markdown)
+    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
