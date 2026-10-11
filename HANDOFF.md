@@ -671,7 +671,7 @@ installed on it."*
 - **Workaround, running now: `pi/scripts/camera_throttle.py`** (new) on the Pi republishes 3 frames a second on `/camera/image/throttled`, and `CAMERA_TOPIC=/camera/image/throttled ~/start_understory.sh` makes the detector, species and localizer nodes read that topic (`scout_ai_up.sh`, new variable). Measured after: ping 45 ms, `/scan` 10.8 Hz, `/pose` 10.4 Hz, `/detections` 1.7 Hz, 2.8 GB available, no node name twice. The Quest and the panorama node still use the full-rate topic. **The throttle was started by hand from a copy in the Pi's `~/fetch_ws/logs/` and is gone after a Pi restart**: `docker exec -d scout bash -c "source /opt/ros/jazzy/setup.bash && python3 /fetch_ws/logs/camera_throttle.py > /fetch_ws/logs/camera_throttle.log 2>&1"`. **Better fix: put the phone's hotspot on 5 GHz** ("Maximize Compatibility" off), reconnect both machines, and run `~/start_understory.sh` without `CAMERA_TOPIC`.
 - At 1:32 AM the Jetson saw none of the Pi's nodes for about three minutes although ping, UDP unicast and multicast worked both ways and the Pi's discovery packets were arriving; it then saw all 41 without any change. Cause not found.
 - Not tested: a plant in front of the camera with the 3 Hz feed; a pin written by the Pi's logger from the Jetson's localizer; Whisper with a human voice (the node was started on the Pi at 1:32 AM).
-- **Not pushed.** The Pi's GitHub login is still invalid; branch `hf-hub-handoff` is on the Jetson and in the Pi's clone.
+- The Pi's GitHub login works again (checked 1:58 AM). Branch `hf-hub-handoff` was pushed to GitHub through the Pi; **it is not merged into `main`** and has no pull request yet.
 
 ## 12. Rules for anyone (or any agent) continuing
 
