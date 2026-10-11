@@ -108,6 +108,21 @@ SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 
 This fallback has not been tested with two machines.
 
+## Troubleshooting (learned Sat night on the real robot)
+
+- **LiDAR silent, camera or QT Py dropping off USB, `error -62`:** the Pi 5 on a power bank (3 A) caps all USB
+  devices at 600 mA. Fixed on this Pi with `PSU_MAX_CURRENT=5000` in the bootloader (`sudo rpi-eeprom-config`,
+  add the line, `--apply`, reboot; `usb_max_current_enable=1` in config.txt was not enough). Check:
+  `od -An -tx1 /proc/device-tree/chosen/power/usb_max_current_enable` must end in `01`.
+- **Never hot-plug the QT Py while the Pi runs** (crashed the USB controller twice, taking the LiDAR with it).
+  Plug it in with the Pi off and the motor battery unplugged.
+- **Pi drops to the venue Wi-Fi (10.37.x):** `sudo nmcli con up hotspot`, turn off the venue network's
+  autoconnect, then `~/scout_down.sh --keep && ~/scout_up.sh --nav` (nodes don't survive a network change).
+- **After any restart on the Pi, restart the Quest app** (it reconnects, but the sticks may not re-register).
+- **Wheel tuning without reflashing:** `ESP32_ARGS="--strafe-fix 1.0" ~/scout_up.sh` (or `--no-strafe`,
+  `--trim fl,fr,rl,rr`). Map/odom: `NAV_ARGS="linear_scale:=.. angular_scale:=.. hfov:=.."`.
+- **Firmware wiring test:** Serial Monitor `T 0`..`T 3` spins FL, FR, RL, RR forward one at a time.
+
 ## What has been tested
 
 - Pi with real LiDAR and camera: `/scan` 10 Hz, `/camera/image/compressed` 15 Hz, slam_toolbox mapping,
@@ -124,7 +139,7 @@ This fallback has not been tested with two machines.
 
 - The Jetson has a GPU image (`pi/jetson/Dockerfile.gpu`) and a TensorRT detector (`nanoowl_trt`, see HANDOFF.md session 9). The Pi runs the AI on the CPU.
 - The Whisper node (`/voice/audio` -> `/voice/text`, started by `scout_ai_up.sh`) has only been tested with synthetic speech.
-- No ESP32 bridge: nothing drives the motors and nothing publishes the real `/sensors`.
+- The robot drives from the Quest (esp32_bridge.py + firmware/esp32_drive). The sensor pod is not wired, so `/sensors` is still fake.
 - The `/species` JSON is not in `AGENTS.md` yet (shape in `HANDOFF.md`, section 5).
 - TF offsets in `scout_bringup.launch.py` are placeholders (`laser` z 0.15, `camera` x 0.08 z 0.10).
 - Odometry is dead-reckoned from `/cmd_vel`. With the robot standing still and spin commands sent,
