@@ -1,6 +1,6 @@
 # Understory handoff: Pi + Jetson (perception, bringup, AI)
 
-Written Sat Oct 10 2026, last updated Sun Oct 11 about 3:30 AM EDT, on the Jetson. **Submission is Sun Oct 11, 9:30 AM EDT.**
+Written Sat Oct 10 2026, last updated Sun Oct 11 about 8:35 AM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
 
 This file is for Alvaro (perception lead) and for any coding agent picking the work up on either the
 Raspberry Pi or the Jetson Orin Nano. It covers what exists, what was tested and how, how to run it,
@@ -736,6 +736,14 @@ installed on it."*
 - `st.components.v1.html` (the headset panel) prints a deprecation warning on Streamlit 1.65 and still works.
 - **Test missions moved aside, nothing restarted:** Jetson `~/fetch_ws/missions/m1_table_test_sun`, Pi `~/fetch_ws/missions/m1_test_sun_0247`. Pin and bubble counters were not reset: restart both sides just before the real survey to start at `m1-p01` and `m1-b01`, and move away any `m1` that has appeared by then.
 - With all of it running at 3:25 AM: camera 15 Hz, `/detections` 15 Hz, ping to the Pi 6 ms, 2.4 GB available on the Jetson.
+
+**Session 13, Sun 8:20 to 8:35 AM, on the Pi.** *"Implement the changes that Kevin made last night and everything we need for our demo."*
+- **Addresses changed: Pi `172.20.10.10`, Jetson `172.20.10.11`, both on "Alvaro's iPhone" (5 GHz).** Sections 3 and 8a still say `.3` and `.4`. **The Quest needs both again:** panel -> Robot address -> `172.20.10.10`, and `echo 172.20.10.11 > dashboard_ip.txt && adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`, then restart the app. At 8:30 AM no Quest was connected to the endpoint and the relay's `/health` showed `headset_publishers: 0`.
+- The Pi had rebooted at about 8:16 AM, came up on `eduroam2` with nothing running and **its clock 3 h 18 min slow**. So every Pi log line, file time and mission folder name from before that reboot is early by that much (`m1_test_pins_sun_0456` is from about 8:14 AM). Clock set from GitHub, then NTP; `sudo nmcli con up hotspot`.
+- **Kevin's overnight commits (to `dff9a09`) are on the Pi**, clone on branch `pi-sun-demo` = `origin/main`. His Pi-side edits (`esp32_bridge.py` `--trim` / `--strafe-fix` / by-id port only, `slam_toolbox_pi.yaml`, camera respawn, `hfov` and odom scale launch arguments) were already in this clone's working tree and are identical to `main`, so the running nodes use them. His four commits after 4 AM are Unity only (`HeadsetStreamer`: fixed table view, 55 degree view, 960x540; camera screen 0.85 m): **they need a Quest build from his machine**, nothing on the Pi or Jetson.
+- The Pi's stack was started at 8:22 AM by another session over SSH (`~/fetch_ws/logs/scout_up_sun_am.log`: `scout_up.sh --nav`, then `scout_ai_up.sh --voice-only`), default bridge trim, no `NAV_ARGS`. Not started a second time. Checked at 8:30 AM from the Pi: `/scan` 10.2 Hz, camera 15.2 Hz, `/pose` 7.8 Hz, `/detections` 16.2 Hz (Jetson), `/mission/state` `IDLE`, TF `map -> base_link` ok, no node name twice, one `/cmd_vel` publisher, bridge `shield=ok`, `get_throttled` `0x0`, no over-current line, 58 C. Jetson dashboard `:8501` answers and the relay's `scan_age` is 0.12 s.
+- **Before the reboot the wheels were driven** (bridge log: `moving=1`, commands up to 0.25 m/s and 0.5 rad/s) **with 9 motor-shield I2C errors, each recovered.** The mission folder from that run holds 36 pins and no bubble (22 cogongrass); someone moved it to `missions/m1_test_pins_sun_0456`, so the next capture writes a clean `m1`.
+- Not done: no drive, capture or voice test from this session; no real mission recorded.
 
 ## 12. Rules for anyone (or any agent) continuing
 
