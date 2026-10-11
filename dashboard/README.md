@@ -17,7 +17,8 @@ On the Jetson the venv is `dashboard/.venv` (git-ignored). If `python3 -m venv` 
 available" (no sudo): `python3 -m venv --without-pip dashboard/.venv`, download `https://bootstrap.pypa.io/get-pip.py`,
 run it with `dashboard/.venv/bin/python`, then `dashboard/.venv/bin/pip install -r dashboard/requirements.txt`.
 
-Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS or ⋮ → Settings),
+Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS until someone uses the
+small sidebar Dark / Light button, which pins it for the whole server and fades it in place),
 Inter for text and Space Grotesk for headings and numbers (Google Fonts; falls back to system fonts offline). Chart colors are
 in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
 
