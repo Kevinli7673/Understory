@@ -36,6 +36,9 @@ const uint8_t SHIELD_ADDR = 0x60;      // default address (solder jumpers change
 const uint8_t WHEEL_PORT[4] = {2, 3, 1, 4};
 // Flip a wheel to -1 if it spins backwards when the robot is told to drive forward (C 0.1 0 0).
 const int8_t WHEEL_DIR[4] = {1, -1, -1, 1};
+// Per-wheel speed multiplier to even out weak motors. Strafe-left drifts backward -> raise FR and RL (index 1, 2);
+// drifts forward -> raise FL and RR (0, 3). Change in steps of ~0.1.
+const float WHEEL_TRIM[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 const float MAX_WHEEL_SPEED = 0.35f;   // m/s a wheel rim reaches at full PWM (calibrate: drive 1 m, time it)
 const float K = 0.20f;                 // half wheelbase + half track width, meters (rotation lever arm)
@@ -79,7 +82,7 @@ void writeWheel(int i, int pwm, uint8_t run, bool force) {
 }
 
 void setWheel(int i, float speed) {           // speed in m/s, signed
-  float s = speed * WHEEL_DIR[i];
+  float s = speed * WHEEL_DIR[i] * WHEEL_TRIM[i];
   int pwm = (int)(fabsf(s) / MAX_WHEEL_SPEED * 255.0f * PWM_CAP + 0.5f);
   if (pwm == 0) { writeWheel(i, 0, RELEASE, false); return; }
   if (pwm < PWM_MIN) pwm = PWM_MIN;
