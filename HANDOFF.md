@@ -647,6 +647,10 @@ installed on it."*
 - **Limits of that test:** wisteria is in the list because the garland was in the room, so the 11 crops are not an independent test. The five good photos are clean web photos; a real or printed plant seen by the robot's camera will score lower than 1.00 and may now fall under 0.6. Not measured. If real plants stop being pinned, lower it: `-p species_node:min_confidence:=0.5`.
 - The Jetson's AI node was restarted at 10:18 PM with the new list (only `ai_node`; mapping, mission and the localizer were not touched). 35 `scout_perception` tests and 7 `amd` tests pass. `amd/deep_pass.py` still uses the phrase list only.
 - **Before recording the real mission, move `~/fetch_ws/missions/m1` away** (it holds the 12 wrong pins and their crops), or the dashboard, the deep pass and the Quest get them too.
+- **10:41 PM: done.** The folder is now `~/fetch_ws/missions/m1_false_alarms_sat` and the Jetson's `ai_node` and localizer were restarted, so pin numbers start again at `m1-p01` and the next capture writes a clean `missions/m1`. After the restart: `/detections` 15.6 Hz, camera 15.0 Hz, `/scan` 9.5 Hz. PRs #9, #10 and #11 (the dashboard) are merged; the Jetson is on `main`.
+- **10:40 PM: the motor shield stopped answering.** `esp32_bridge.log` on the Pi: `shield=MISSING`, `ERROR: I2C to motor shield failed (code 5, 58 so far): loose SDA/SCL/GND wire, or motor noise on the I2C lines`, one more every 2 s. It was `shield=ok` until at least 10:05 PM. Hardware: check the three wires between the QT Py and the shield and the shield's power. Still no `moving=1` in the log.
+- **Memory on the Jetson at 10:43 PM: 860 MB available, no swap.** Firefox had been opened on the Jetson's desktop (about 1 GB) and a second Claude session was running. With the browser closed it was 2.2 GB. Do not browse on the Jetson while the stack runs.
+- For a dry run of the AMD steps before a real mission exists, `fake_data/missions/m1` has 64 frames, a map and bubbles.
 
 ## 12. Rules for anyone (or any agent) continuing
 
