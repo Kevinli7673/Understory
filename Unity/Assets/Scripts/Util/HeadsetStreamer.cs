@@ -36,6 +36,14 @@ namespace Understory
         [SerializeField, Range(30, 100)] float fieldOfView = 55f;
         // 0 = follow the head exactly, closer to 1 = steadier but laggier (head jitter is hard to watch).
         [SerializeField, Range(0f, 0.9f)] float smoothing = 0.5f;
+        // Table: a fixed camera in front of the table, framing the LiDAR map and the robot camera screen
+        // behind it, wherever the wearer looks. Head: what the wearer sees. Table mode shows the head view
+        // while the table is hidden (inside a bubble).
+        public enum View { Table, Head }
+        [SerializeField] View view = View.Table;
+        [SerializeField] float tableCamHeight = 0.7f;   // above the slab top (m)
+        [SerializeField] float tableCamBack = 0.55f;    // behind the near edge (m)
+        TabletopMap table;
 
         public static HeadsetStreamer Instance { get; private set; }
         /// <summary>"off", "connecting ws://...", "live ws://...".</summary>
@@ -100,21 +108,45 @@ namespace Understory
             nextCapture = Time.unscaledTime + 1f / Mathf.Max(1f, fps);
 
             // Follow the eye camera, render once, read back asynchronously (no GPU stall).
-            var src = source.transform;
+            Vector3 pos;
+            Quaternion rot;
+            if (!TableViewPose(out pos, out rot))
+            {
+                pos = source.transform.position;
+                rot = source.transform.rotation;
+            }
             if (!posed)
             {
-                cam.transform.SetPositionAndRotation(src.position, src.rotation);
+                cam.transform.SetPositionAndRotation(pos, rot);
                 posed = true;
             }
             else
             {
                 float t = 1f - smoothing;
-                cam.transform.SetPositionAndRotation(Vector3.Lerp(cam.transform.position, src.position, t),
-                                                     Quaternion.Slerp(cam.transform.rotation, src.rotation, t));
+                cam.transform.SetPositionAndRotation(Vector3.Lerp(cam.transform.position, pos, t),
+                                                     Quaternion.Slerp(cam.transform.rotation, rot, t));
             }
             cam.Render();
             readbackBusy = true;
             AsyncGPUReadback.Request(rt, 0, TextureFormat.RGB24, OnReadback);
+        }
+
+        /// <summary>Fixed spectator pose in front of the table (follows it when grabbed / recentered).</summary>
+        bool TableViewPose(out Vector3 pos, out Quaternion rot)
+        {
+            pos = default;
+            rot = default;
+            if (view != View.Table) return false;
+            if (table == null) table = FindAnyObjectByType<TabletopMap>();
+            if (table == null || !table.Visible || table.Root == null) return false;
+            var root = table.Root;
+            float halfDepth = table.HalfExtents.y;
+            // Look at a point a bit past the board's center and above it, so the board and the camera
+            // screen standing behind its far edge are both in frame.
+            pos = root.TransformPoint(new Vector3(0f, tableCamHeight, -halfDepth - tableCamBack));
+            var target = root.TransformPoint(new Vector3(0f, 0.15f, halfDepth * 0.35f));
+            rot = Quaternion.LookRotation(target - pos, root.up);
+            return true;
         }
 
         bool EnsureCamera()

@@ -64,7 +64,7 @@ adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/
 ```
 
 - `Unity/Assets/Scripts/Util/HeadsetStreamer.cs` creates itself at startup; it is off until `dashboard_ip.txt`
-  exists. 960×540, 55° vertical view (narrower than the eye, so the table fills the frame), head motion smoothed, 8 fps, JPEG 70, newest frame only. Passthrough is not in the stream (the OS composites it),
+  exists. By default a fixed camera in front of the table frames the LiDAR map and the robot camera screen, whatever the wearer looks at (inside a bubble it shows the wearer's view; `view = Head` on the component always does). 960×540, 55° vertical view, 8 fps, JPEG 70, newest frame only. Passthrough is not in the stream (the OS composites it),
   so virtual content shows over Soot.
 - The browser connects to `ws://<dashboard host>:8770/ws/headset`; override with `LIVE_RELAY_WS`. The dashboard
   server reads scans from `LIVE_RELAY_URL` (default `http://localhost:8770`). `LIVE_FLIP=1` flips the image if
