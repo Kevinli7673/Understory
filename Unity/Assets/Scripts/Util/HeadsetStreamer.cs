@@ -28,10 +28,14 @@ namespace Understory
         const int Port = 8770;
         const string PathPub = "/ws/headset/pub";
 
-        [SerializeField] int width = 640;
-        [SerializeField] int height = 360;
+        [SerializeField] int width = 960;
+        [SerializeField] int height = 540;
         [SerializeField] float fps = 8f;
-        [SerializeField, Range(30, 90)] int quality = 60;
+        [SerializeField, Range(30, 90)] int quality = 70;
+        // The eye camera is ~100 deg wide: on a flat screen the table and panels came out tiny. Vertical FOV.
+        [SerializeField, Range(30, 100)] float fieldOfView = 55f;
+        // 0 = follow the head exactly, closer to 1 = steadier but laggier (head jitter is hard to watch).
+        [SerializeField, Range(0f, 0.9f)] float smoothing = 0.5f;
 
         public static HeadsetStreamer Instance { get; private set; }
         /// <summary>"off", "connecting ws://...", "live ws://...".</summary>
@@ -42,6 +46,7 @@ namespace Understory
         RenderTexture rt;
         float nextCapture;
         bool readbackBusy;
+        bool posed;                         // stream camera placed at least once (smoothing starts from there)
         byte[] pending;                     // newest encoded JPEG waiting to be sent
         readonly object pendingLock = new object();
         CancellationTokenSource cts;
@@ -95,7 +100,18 @@ namespace Understory
             nextCapture = Time.unscaledTime + 1f / Mathf.Max(1f, fps);
 
             // Follow the eye camera, render once, read back asynchronously (no GPU stall).
-            cam.transform.SetPositionAndRotation(source.transform.position, source.transform.rotation);
+            var src = source.transform;
+            if (!posed)
+            {
+                cam.transform.SetPositionAndRotation(src.position, src.rotation);
+                posed = true;
+            }
+            else
+            {
+                float t = 1f - smoothing;
+                cam.transform.SetPositionAndRotation(Vector3.Lerp(cam.transform.position, src.position, t),
+                                                     Quaternion.Slerp(cam.transform.rotation, src.rotation, t));
+            }
             cam.Render();
             readbackBusy = true;
             AsyncGPUReadback.Request(rt, 0, TextureFormat.RGB24, OnReadback);
@@ -119,7 +135,10 @@ namespace Understory
             cam.CopyFrom(source);
             cam.stereoTargetEye = StereoTargetEyeMask.None;  // mono, into our texture, not the headset
             cam.targetTexture = rt;
-            cam.enabled = false;                              // rendered by hand at `fps`
+            cam.fieldOfView = fieldOfView;
+            cam.aspect = (float)width / height;
+            posed = false;
+            cam.enabled = false;                             // rendered by hand at `fps`
             if (cam.clearFlags == CameraClearFlags.Skybox && RenderSettings.skybox == null)
                 cam.clearFlags = CameraClearFlags.SolidColor;
             if (cam.clearFlags == CameraClearFlags.SolidColor && cam.backgroundColor.a < 1f)

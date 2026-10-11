@@ -403,7 +403,7 @@ The Jetson side is running (`dashboard/run.sh`, Sun 3:25 AM). The relay is at **
    - `http://172.20.10.4:8501`: the top panel changes from "Waiting for the headset" to the picture with "live · 8 fps".
 
 Things to know:
-- The stream is 640x360, 8 frames a second, JPEG quality 60 (fields on the component). Passthrough is not in it,
+- The stream is 960x540, 8 frames a second, JPEG quality 70, 55° vertical view, head motion smoothed (fields on the component). Passthrough is not in it,
   because the headset's system adds passthrough after the app renders: virtual content shows on a dark background.
 - If the picture is upside down, restart the dashboard with `LIVE_FLIP=1 dashboard/run.sh` (after `dashboard/run.sh --stop`).
 - The Quest, the Jetson and the viewing laptop must be on the same hotspot. The browser opens
