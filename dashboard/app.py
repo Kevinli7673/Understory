@@ -1,4 +1,4 @@
-"""Understory survey dashboard.
+"""Understory dashboard.
 
     streamlit run dashboard/app.py      # from the repo root, so .streamlit/config.toml (the theme) is picked up
 
@@ -8,6 +8,7 @@ it needs no internet.
 """
 import base64
 import io
+import json
 import math
 import os
 import sys
@@ -18,43 +19,46 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from mission_io import (MATCH_RADIUS_M, SENSOR_KEYS, before_after_summary, bin_readings,  # noqa: E402
-                        load_mission, map_extent)
+from mission_io import SENSOR_KEYS, load_mission, map_extent  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 load_dotenv(REPO / '.env')
 
 # Colors per theme: only the Eucalyptus / Mist / Plaster / Soot / Moss palette (and lighter/darker steps of it).
-# Plant markers are told apart by lightness and shape, not hue: invasive = dark Soot ✕, native = Eucalyptus dot,
-# removed = Mist dot, new = Moss diamond. Keep in sync with .streamlit/config.toml.
+# Plant markers are told apart by lightness and shape, not hue: invasive = dark Soot ✕, native = Eucalyptus dot.
+# Keep in sync with .streamlit/config.toml.
 EUCALYPTUS, MIST, PLASTER, SOOT, MOSS = '#98aa9d', '#b3c9d6', '#f2efe2', '#2d3536', '#697c70'
 PALETTES = {
     'light': {
-        'native': EUCALYPTUS, 'native_line': MOSS, 'invasive': SOOT, 'removed': MIST, 'removed_line': '#6b93b0',
-        'new': MOSS, 'text': SOOT, 'muted': '#5b6661', 'faint': '#8a948e', 'border': '#dcd8c8',
+        'native': EUCALYPTUS, 'native_line': MOSS, 'invasive': SOOT,
+        'lidar': '#4c7698', 'lidar_fill': 'rgba(179,201,214,0.35)', 'robot': SOOT,
+        'side_text': SOOT, 'side_card': 'rgba(242,239,226,0.55)', 'side_tag': (SOOT, PLASTER),
+        'text': SOOT, 'muted': '#5b6661', 'faint': '#8a948e', 'border': '#dcd8c8',
         'card': '#faf8f1', 'surface': PLASTER, 'accent': '#55675c',
-        'grid': 'rgba(45,53,54,0.08)', 'fill': 'rgba(152,170,157,0.22)', 'line': MOSS,
         'wall': (45, 53, 54, 235), 'floor': (251, 250, 245, 255), 'unknown': (231, 228, 213, 255),
-        'seq': ['#e6edf1', '#cbdbe4', '#b3c9d6', '#8fb0c6', '#6b93b0', '#4c7698', '#355a78'],  # Mist ramp
     },
     'dark': {
-        'native': EUCALYPTUS, 'native_line': '#c9d6cc', 'invasive': PLASTER, 'removed': MIST, 'removed_line': '#d7e4ec',
-        'new': EUCALYPTUS, 'text': PLASTER, 'muted': '#b9c2bb', 'faint': '#8a968f', 'border': '#435051',
+        'native': EUCALYPTUS, 'native_line': '#c9d6cc', 'invasive': PLASTER,
+        'lidar': MIST, 'lidar_fill': 'rgba(179,201,214,0.16)', 'robot': PLASTER,
+        'side_text': PLASTER, 'side_card': 'rgba(242,239,226,0.06)', 'side_tag': (EUCALYPTUS, SOOT),
+        'text': PLASTER, 'muted': '#b9c2bb', 'faint': '#8a968f', 'border': '#435051',
         'card': '#343d3e', 'surface': SOOT, 'accent': EUCALYPTUS,
-        'grid': 'rgba(242,239,226,0.07)', 'fill': 'rgba(152,170,157,0.16)', 'line': EUCALYPTUS,
         'wall': (230, 226, 210, 230), 'floor': (54, 64, 66, 255), 'unknown': (47, 56, 57, 255),
-        'seq': ['#3b4a52', '#3f5a6e', '#4c7698', '#6b93b0', '#8fb0c6', '#b3c9d6', '#d7e4ec'],
     },
 }
 FONT = 'Inter, -apple-system, "Segoe UI", sans-serif'
 DISPLAY = '"Space Grotesk", Inter, -apple-system, sans-serif'
-SENSOR_NAMES = {
-    'temp_c': 'Temperature (°C)', 'pressure_hpa': 'Pressure (hPa)', 'soil_moisture': 'Soil moisture (raw)',
-    'light': 'Light (raw)', 'uv': 'UV index', 'air_quality': 'Air quality (raw)', 'sound': 'Sound (raw)',
-}
+# Live feeds come through dashboard/live_relay.py. The dashboard server polls it for the newest LiDAR scan; the
+# viewer's browser opens the headset WebSocket itself (default: same host as this page, port 8770).
+RELAY_HTTP = os.environ.get('LIVE_RELAY_URL', 'http://localhost:8770').rstrip('/')
+RELAY_WS = os.environ.get('LIVE_RELAY_WS', '')
+LIVE_FLIP = os.environ.get('LIVE_FLIP') == '1'
+SCAN_STALE_S = 3.0
+
 # Metric cards cycle through the palette like swatches: (background, text).
 SWATCHES = [(EUCALYPTUS, SOOT), (MIST, SOOT), ('#faf8f1', SOOT), (SOOT, PLASTER), (MOSS, '#ffffff')]
 
@@ -82,16 +86,17 @@ def inject_css():
 .block-container {{ padding-top: 2rem; max-width: 1380px; }}
 [data-testid="stDecoration"] {{ display: none; }}
 
-.us-hero {{ background: {MOSS}; border-radius: 28px; padding: 2rem 2.4rem 1.7rem; margin: 0 0 1.4rem 0;
+.us-hero {{ background: {MOSS}; border-radius: 28px; padding: 1.6rem 2.4rem; margin: 0 0 1rem 0;
             box-shadow: 0 10px 30px rgba(45,53,54,0.12); }}
-.us-eyebrow {{ font-size: .74rem; font-weight: 600; letter-spacing: .22em; text-transform: uppercase;
-               color: {PLASTER}; opacity: .85; margin-bottom: .2rem; }}
 .us-title {{ font-family: {DISPLAY}; font-size: 2.8rem; font-weight: 600; line-height: 1.05; letter-spacing: -0.03em;
              color: #ffffff; margin: 0; }}
-.us-sub {{ color: #ffffff; font-size: 1rem; margin-top: .5rem; max-width: 62ch; opacity: .95; }}
+.us-desc {{ margin: .2rem 0 1.2rem; }}
 .us-chip {{ display: inline-block; padding: .2rem .8rem; border-radius: 999px; font-size: .74rem; font-weight: 600;
             letter-spacing: .12em; text-transform: uppercase; color: {SOOT}; background: {PLASTER};
-            margin: 1rem .4rem 0 0; }}
+            margin: .8rem .4rem 0 0; }}
+.us-chip.soot {{ background: {SOOT}; color: {PLASTER}; }}
+.us-desc .us-chip:not(.soot):not(.mist) {{ background: {P['card']}; color: {P['text']}; border: 1px solid {P['border']}; }}
+.us-chip.soot {{ border: 1px solid {P['border']}; }}
 .us-chip.mist {{ background: {MIST}; }}
 
 [data-testid="stMetric"] {{ border-radius: 22px; padding: 18px 22px 16px; border: 1px solid rgba(45,53,54,0.08);
@@ -109,29 +114,26 @@ def inject_css():
                margin: .2rem 0 0; line-height: 1.2; }}
 .us-note {{ color: {P['muted']}; font-size: .85rem; }}
 
-.us-ba {{ display: flex; align-items: center; gap: 1.6rem; padding: 1.5rem 2rem; border-radius: 28px;
-          background: {SOOT}; margin: .4rem 0 1.2rem; flex-wrap: wrap; box-shadow: 0 10px 30px rgba(45,53,54,0.15);
-          border: 1px solid #435051; }}
-.us-ba-num {{ font-family: {DISPLAY}; font-variant-numeric: lining-nums; font-size: 3.4rem; line-height: 1; font-weight: 600; letter-spacing: -0.03em;
-              color: {PLASTER}; }}
-.us-ba-num.after {{ color: {MIST}; }}
-.us-ba-arrow {{ font-size: 2rem; color: {EUCALYPTUS}; }}
-.us-ba-cap {{ color: {PLASTER}; opacity: .75; font-size: .7rem; text-transform: uppercase; letter-spacing: .18em;
-              font-weight: 600; }}
-.us-ba-text {{ margin-left: auto; text-align: right; }}
-.us-ba-pct {{ font-family: {DISPLAY}; font-variant-numeric: lining-nums; font-size: 1.9rem; color: {EUCALYPTUS}; font-weight: 600; letter-spacing: -0.02em; }}
-.us-ba .us-note {{ color: {PLASTER}; opacity: .75; }}
-
-.us-pill {{ display: inline-block; padding: .08rem .55rem; border-radius: 999px; font-size: .68rem; font-weight: 600;
-            letter-spacing: .08em; text-transform: uppercase; }}
-.us-pill.inv {{ color: {PLASTER}; background: {SOOT}; }}
-.us-pill.nat {{ color: {SOOT}; background: {EUCALYPTUS}; }}
+.us-live {{ display: inline-flex; align-items: center; gap: .4rem; padding: .15rem .65rem; border-radius: 999px;
+            font-size: .68rem; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+            background: {P['card']}; color: {P['muted']}; border: 1px solid {P['border']}; }}
+.us-live.on {{ background: {SOOT}; color: {PLASTER}; border-color: {SOOT}; }}
+.us-live .dot {{ width: 7px; height: 7px; border-radius: 50%; background: {P['faint']}; }}
+.us-live.on .dot {{ background: {EUCALYPTUS}; box-shadow: 0 0 0 3px rgba(152,170,157,0.35); }}
 .us-card-title {{ font-family: {DISPLAY}; font-weight: 600; font-size: .98rem; margin-top: .3rem;
                   color: {P['text']}; }}
 .us-card-meta {{ color: {P['muted']}; font-size: .78rem; }}
 
-.us-brand {{ font-family: {DISPLAY}; font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: .1rem; }}
-.us-brand-sub {{ font-size: .7rem; letter-spacing: .16em; text-transform: uppercase; opacity: .75; margin-bottom: 1.2rem; }}
+.us-brand {{ font-family: {DISPLAY}; font-size: 2.7rem; font-weight: 700; letter-spacing: -0.04em; line-height: 1;
+              color: {P['side_text']}; margin: .2rem 0 .5rem; }}
+.us-brand-sub {{ display: inline-block; font-size: .68rem; font-weight: 600; letter-spacing: .16em; text-transform: uppercase;
+                 color: {P['side_tag'][1]}; background: {P['side_tag'][0]}; padding: .2rem .7rem; border-radius: 999px; margin-bottom: 1.1rem; }}
+.us-side-desc {{ font-size: .95rem; line-height: 1.55; color: {P['side_text']}; margin-bottom: .9rem; }}
+.us-side-steps {{ margin: 0 0 1.2rem; }}
+.us-side-steps .step {{ font-size: .85rem; line-height: 1.45; color: {P['side_text']}; padding: .55rem .8rem; margin-bottom: .4rem;
+                     background: {P['side_card']}; border-radius: 14px; }}
+.us-side-steps b {{ font-family: {DISPLAY}; font-weight: 600; }}
+.us-side-rule {{ border: 0; border-top: 1px solid rgba(45,53,54,0.18); margin: .2rem 0 1rem; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -141,10 +143,6 @@ def section(title, note=None):
     if note:
         html += f'<div class="us-note">{note}</div>'
     st.markdown(html, unsafe_allow_html=True)
-
-
-def pill(invasive):
-    return '<span class="us-pill inv">invasive</span>' if invasive else '<span class="us-pill nat">native</span>'
 
 
 # ---------- data sources ----------
@@ -267,8 +265,8 @@ def style(fig, height, title=None):
     return fig
 
 
-def chart(fig):
-    st.plotly_chart(fig, theme=None, width='stretch', config={'displaylogo': False})
+def chart(fig, key=None):
+    st.plotly_chart(fig, theme=None, width='stretch', config={'displaylogo': False}, key=key)
 
 
 def map_figure(mission, height=560):
@@ -283,7 +281,9 @@ def map_figure(mission, height=560):
         fig.update_yaxes(range=[y0, y1])
     fig.update_xaxes(title='x (m)')
     fig.update_yaxes(title='y (m)', scaleanchor='x', scaleratio=1)
-    return style(fig, height)
+    style(fig, height)
+    fig.update_layout(margin=dict(l=56, r=8, t=8, b=44))  # room for the x-axis numbers
+    return fig
 
 
 def add_path(fig, readings):
@@ -298,10 +298,8 @@ def add_bubbles(fig, bubbles):
     if not bubbles:
         return
     fig.add_trace(go.Scatter(
-        x=[b['x'] for b in bubbles], y=[b['y'] for b in bubbles], mode='markers+text', name='360° bubble',
-        text=[b['bubble_id'].split('-')[-1] for b in bubbles], textposition='top center',
-        textfont=dict(size=11, color=P['muted']),
-        marker=dict(symbol='circle-open', size=17, color=P['muted'], line=dict(width=2)),
+        x=[b['x'] for b in bubbles], y=[b['y'] for b in bubbles], mode='markers', name='360° bubble',
+        marker=dict(symbol='circle-open', size=15, color=P['muted'], line=dict(width=2)),
         customdata=[[b['bubble_id'], 'stitched panorama' if b.get('stitched') else 'frame ring'] for b in bubbles],
         hovertemplate='<b>%{customdata[0]}</b><br>%{customdata[1]}<br>(%{x:.2f}, %{y:.2f}) m<extra></extra>'))
 
@@ -317,31 +315,122 @@ def add_pins(fig, pins, name, color, symbol, size=13, outline=None):
                       '<br>(%{x:.2f}, %{y:.2f}) m<extra></extra>'))
 
 
-def heat_figure(mission, key, cell_m):
-    cells = bin_readings(mission['readings'], key, cell_m)
-    fig = map_figure(mission, height=600)
-    if cells:
-        ixs = [c[0] for c in cells]
-        iys = [c[1] for c in cells]
-        xs = np.arange(min(ixs), max(ixs) + 1)
-        ys = np.arange(min(iys), max(iys) + 1)
-        z = np.full((len(ys), len(xs)), np.nan)
-        for (ix, iy), v in cells.items():
-            z[iy - ys[0], ix - xs[0]] = v
-        seq = P['seq']
-        fig.add_trace(go.Heatmap(
-            x=(xs + 0.5) * cell_m, y=(ys + 0.5) * cell_m, z=z, opacity=0.92, name=SENSOR_NAMES[key],
-            colorscale=[[i / (len(seq) - 1), c] for i, c in enumerate(seq)], xgap=3, ygap=3,
-            colorbar=dict(title=dict(text=SENSOR_NAMES[key], font=dict(size=12, color=P['muted'])), thickness=10,
-                          outlinewidth=0, tickfont=dict(size=11, color=P['faint'])),
-            hovertemplate=f'<b>%{{z:.2f}}</b> {SENSOR_NAMES[key]}<br>cell centre (%{{x:.2f}}, %{{y:.2f}}) m<extra></extra>'))
-    add_bubbles(fig, mission['bubbles'])
-    fig.update_layout(showlegend=False)
-    return fig
-
-
 def fmt_time(t):
     return pd.to_datetime(t, unit='s', utc=True).strftime('%b %d, %Y · %H:%M UTC') if t else '—'
+
+
+# ---------- live (dashboard/live_relay.py) ----------
+
+def relay_up():
+    try:
+        with urllib.request.urlopen(RELAY_HTTP + '/health', timeout=0.3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def fetch_scan():
+    """Newest LiDAR scan from the relay, or None when there is none or it is stale."""
+    try:
+        with urllib.request.urlopen(RELAY_HTTP + '/scan', timeout=0.3) as r:
+            if r.status != 200:
+                return None
+            scan = json.loads(r.read())
+    except Exception:
+        return None
+    return scan if scan.get('age', 1e9) <= SCAN_STALE_S else None
+
+
+def add_scan(fig, scan):
+    pts = scan.get('points') or []
+    if pts:
+        xs, ys = zip(*pts)
+        # the area the LiDAR sees right now (beams are in angle order), then the hits themselves
+        fig.add_trace(go.Scatter(x=xs + xs[:1], y=ys + ys[:1], mode='lines', fill='toself', hoverinfo='skip',
+                                 fillcolor=P['lidar_fill'], line=dict(width=0), showlegend=False))
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode='markers', name='LiDAR (live)', hoverinfo='skip',
+                                 marker=dict(size=4, color=P['lidar'], opacity=0.9)))
+    pose = scan.get('pose')
+    if pose:
+        fig.add_trace(go.Scatter(
+            x=[pose['x']], y=[pose['y']], mode='markers', name='Robot',
+            marker=dict(symbol='triangle-up', size=18, color=P['robot'], angle=90 - math.degrees(pose.get('yaw', 0)),
+                        line=dict(width=2, color=P['surface'])),
+            hovertemplate='<b>Robot</b><br>(%{x:.2f}, %{y:.2f}) m<extra></extra>'))
+
+
+def survey_map(mission, pins):
+    scan = fetch_scan()
+    if scan:
+        st.markdown(f'<span class="us-live on"><span class="dot"></span>LiDAR live · {len(scan["points"])} points'
+                    '</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="us-live"><span class="dot"></span>LiDAR offline</span>', unsafe_allow_html=True)
+    fig = map_figure(mission)
+    add_path(fig, mission['readings'])
+    add_bubbles(fig, mission['bubbles'])
+    add_pins(fig, [p for p in pins if not p['invasive']], 'Native', P['native'], 'circle', 14, outline=P['native_line'])
+    add_pins(fig, [p for p in pins if p['invasive']], 'Invasive', P['invasive'], 'x', 14)
+    if scan:
+        add_scan(fig, scan)
+    fig.update_layout(uirevision='survey-map')  # keep zoom/pan across live refreshes
+    chart(fig, key='survey-map')
+
+
+def live_camera(height=300):
+    """Headset view: the browser opens the relay WebSocket and shows each JPEG frame as it arrives."""
+    components.html(f"""
+<style>
+  html, body {{ margin: 0; background: transparent; font-family: Inter, -apple-system, 'Segoe UI', sans-serif; }}
+  #wrap {{ position: relative; height: {height - 8}px; border-radius: 18px; overflow: hidden; background: {SOOT}; }}
+  #v {{ width: 100%; height: 100%; object-fit: contain; display: none; {'transform: scaleY(-1);' if LIVE_FLIP else ''} }}
+  #ph {{ position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+         color: {PLASTER}; gap: .35rem; text-align: center; padding: 0 1.5rem; }}
+  #ph b {{ font-size: .95rem; font-weight: 600; }}
+  #ph span {{ font-size: .78rem; opacity: .7; }}
+  #badge {{ position: absolute; top: 12px; left: 12px; display: inline-flex; align-items: center; gap: .4rem;
+            padding: .2rem .65rem; border-radius: 999px; font-size: .66rem; font-weight: 600; letter-spacing: .14em;
+            text-transform: uppercase; background: {PLASTER}; color: {SOOT}; }}
+  #badge i {{ width: 7px; height: 7px; border-radius: 50%; background: #8a948e; }}
+  #badge.on i {{ background: {MOSS}; box-shadow: 0 0 0 3px rgba(105,124,112,.35); }}
+</style>
+<div id="wrap">
+  <img id="v" alt="Headset view">
+  <div id="ph"><b>Waiting for the headset</b><span>Start dashboard/live_relay.py and push dashboard_ip.txt to the Quest.</span></div>
+  <div id="badge"><i></i><span id="bt">offline</span></div>
+</div>
+<script>
+(() => {{
+  let host = 'localhost';
+  try {{ host = window.parent.location.hostname || host; }} catch (e) {{}}
+  const url = {json.dumps(RELAY_WS)} || `ws://${{host}}:8770/ws/headset`;
+  const img = document.getElementById('v'), ph = document.getElementById('ph');
+  const badge = document.getElementById('badge'), bt = document.getElementById('bt');
+  let last = 0, frames = [], prevUrl = null;
+  function setLive(on) {{
+    badge.classList.toggle('on', on); img.style.display = on ? 'block' : 'none'; ph.style.display = on ? 'none' : 'flex';
+    if (!on) bt.textContent = 'offline';
+  }}
+  function connect() {{
+    const ws = new WebSocket(url);
+    ws.binaryType = 'blob';
+    ws.onmessage = (ev) => {{
+      const u = URL.createObjectURL(ev.data);
+      img.onload = () => {{ if (prevUrl) URL.revokeObjectURL(prevUrl); prevUrl = u; }};
+      img.src = u;
+      const now = performance.now(); last = now;
+      frames.push(now); frames = frames.filter(t => now - t < 2000);
+      bt.textContent = `live · ${{(frames.length / 2).toFixed(0)}} fps`;
+      setLive(true);
+    }};
+    ws.onclose = () => {{ setLive(false); setTimeout(connect, 2000); }};
+    ws.onerror = () => ws.close();
+  }}
+  setInterval(() => {{ if (last && performance.now() - last > 3000) setLive(false); }}, 1000);
+  connect();
+}})();
+</script>
+""", height=height)
 
 
 # ---------- pages ----------
@@ -354,22 +443,17 @@ def page_overview(mission):
     pins = active_pins(mission)
     invasive = [p for p in pins if p['invasive']]
     duration = (mission['ended_at'] - mission['started_at']) / 60 if mission['started_at'] else 0
-    c = st.columns(5)
-    c[0].metric('360° bubbles', len(mission['bubbles']))
-    c[1].metric('Plants pinned', len(pins))
-    c[2].metric('Invasive', len(invasive))
-    c[3].metric('Species', len({p['label'] for p in pins}))
-    c[4].metric('Duration', f'{duration:.1f} min')
+    c = st.columns(4)
+    c[0].metric('Plants pinned', len(pins))
+    c[1].metric('Invasive', len(invasive))
+    c[2].metric('Species', len({p['label'] for p in pins}))
+    c[3].metric('Duration', f'{duration:.1f} min')
 
     left, right = st.columns([3, 2], gap='medium')
     with left, st.container(border=True):
-        section('Survey map', 'Each pin is a plant the robot saw, placed on the LiDAR map.')
-        fig = map_figure(mission)
-        add_path(fig, mission['readings'])
-        add_bubbles(fig, mission['bubbles'])
-        add_pins(fig, [p for p in pins if not p['invasive']], 'Native', P['native'], 'circle', 14, outline=P['native_line'])
-        add_pins(fig, invasive, 'Invasive', P['invasive'], 'x', 14)
-        chart(fig)
+        section('Survey map', 'Plants the robot saw on the LiDAR map, plus the live scan.')
+        live = relay_up()
+        st.fragment(run_every=1.0 if live else 5.0)(survey_map)(mission, pins)
     with right:
         with st.container(border=True):
             section('Pins per species')
@@ -385,187 +469,20 @@ def page_overview(mission):
                     hovertemplate='<b>%{y}</b>: %{x}<extra></extra>'))
                 style(bar, 34 * len(counts) + 30)
                 bar.update_layout(margin=dict(l=int(7.6 * counts['label'].str.len().max()) + 16, r=96, t=8, b=8))
-                bar.update_yaxes(automargin=True, ticksuffix='  ')
+                bar.update_yaxes(automargin=True, ticksuffix='  ', tickfont=dict(size=12, color=P['text']), title=None)
                 bar.update_xaxes(visible=False)
-                bar.update_yaxes(tickfont=dict(size=12, color=P['text']), title=None)
                 chart(bar)
             else:
                 st.caption('No pins in this mission.')
-        bubble_ids = [b['bubble_id'] for b in mission['bubbles']]
-        if bubble_ids:
-            with st.container(border=True):
-                section('Inside a bubble')
-                bid = st.selectbox('Bubble', bubble_ids, label_visibility='collapsed')
-                show_bubble(mission, next(b for b in mission['bubbles'] if b['bubble_id'] == bid))
 
-    section('Pins', 'Every plant pinned in this mission, with the crop it was named from.')
-    rows = [{'crop': crop_src(mission, p), 'pin': p['pin_id'], 'species': p['label'],
-             'invasive': p['invasive'], 'confidence': p.get('confidence'), 'bubble': p.get('bubble_id'),
-             'x (m)': p['x'], 'y (m)': p['y'], 'source': p.get('source', 'live')} for p in pins]
+    section('Pins')
+    rows = [{'crop': crop_src(mission, p), 'species': p['label'], 'invasive': p['invasive'],
+             'confidence': p.get('confidence')} for p in pins]
     st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch', row_height=56, column_config={
         'crop': st.column_config.ImageColumn('Crop', width='small'),
-        'pin': 'Pin', 'species': 'Species', 'bubble': 'Bubble', 'source': 'Source',
+        'species': 'Species',
         'invasive': st.column_config.CheckboxColumn('Invasive'),
-        'x (m)': st.column_config.NumberColumn('x (m)', format='%.2f'),
-        'y (m)': st.column_config.NumberColumn('y (m)', format='%.2f'),
         'confidence': st.column_config.ProgressColumn('Confidence', min_value=0, max_value=1, format='%.2f')})
-
-
-def show_bubble(mission, bubble):
-    bid = bubble['bubble_id']
-    pano = image_src(mission, f'frames/{bid}_pano.jpg') if bubble.get('stitched') else None
-    if pano:
-        st.image(pano, width='stretch')
-        st.caption(f'{bid} · stitched 360° panorama')
-        return
-    frames = sorted(bubble.get('frames', []), key=lambda f: f['index'])
-    st.caption(f'{bid} · stitching fell back to the frame ring ({len(frames)} frames)')
-    cols = st.columns(4)
-    for i, f in enumerate(frames):
-        src = image_src(mission, f"frames/{bid}_{f['index']}.jpg")
-        if src:
-            cols[i % 4].image(src, caption=f"{math.degrees(f['yaw']):.0f}°", width='stretch')
-
-
-def page_sensors(mission):
-    readings = mission['readings']
-    present = [k for k in SENSOR_KEYS if any(k in r for r in readings)]
-    if not present:
-        st.info('This mission has no sensor readings.')
-        return
-    c1, c2 = st.columns([2, 1], gap='medium')
-    key = c1.selectbox('Sensor', present, format_func=SENSOR_NAMES.get)
-    cell = c2.select_slider('Cell size (m)', [0.25, 0.5, 1.0], value=0.5)
-    vals = [r[key] for r in readings if key in r]
-    c = st.columns(4)
-    c[0].metric('Readings', f'{len(vals)} of {len(readings)}')
-    c[1].metric('Min', f'{min(vals):.2f}')
-    c[2].metric('Mean', f'{np.mean(vals):.2f}')
-    c[3].metric('Max', f'{max(vals):.2f}')
-    with st.container(border=True):
-        section(f'{SENSOR_NAMES[key]} across the site', f'Mean of the readings in each {cell} m cell; '
-                'darker is higher. Readings without this sensor are skipped.')
-        chart(heat_figure(mission, key, cell))
-    with st.container(border=True):
-        series = pd.DataFrame([{'time': pd.to_datetime(r['t'], unit='s'), key: r[key]} for r in readings if key in r])
-        line = go.Figure(go.Scatter(
-            x=series['time'], y=series[key], mode='lines', line=dict(color=P['line'], width=2.5, shape='spline'),
-            fill='tozeroy', fillcolor=P['fill'],
-            hovertemplate='%{x|%H:%M:%S}<br><b>%{y:.2f}</b><extra></extra>'))
-        style(line, 260, f'{SENSOR_NAMES[key]} over time')
-        lo, hi = min(vals), max(vals)
-        pad = (hi - lo) * 0.15 or 1
-        line.update_yaxes(range=[lo - pad, hi + pad], showgrid=True, gridcolor=P['grid'])
-        chart(line)
-
-
-def page_before_after(load, mission_ids):
-    if len(mission_ids) < 2:
-        st.info('Needs two missions over the same ground: a "before" and an "after" survey.')
-        return
-    c1, c2, c3 = st.columns([1, 1, 1], gap='medium')
-    before_id = c1.selectbox('Before', mission_ids, index=0)
-    after_id = c2.selectbox('After', mission_ids, index=len(mission_ids) - 1)
-    with c3:
-        st.write('')
-        invasive_only = st.toggle('Invasive species only', value=True)
-    before, after = load(before_id), load(after_id)
-    srcs = st.session_state.sources
-    bp = [p for p in before['pins'] if p.get('source', 'live') in srcs]
-    ap = [p for p in after['pins'] if p.get('source', 'live') in srcs]
-    rows, totals, pairs, removed, new = before_after_summary(bp, ap, invasive_only)
-
-    what = 'invasive plants' if invasive_only else 'plants'
-    pct = 100 * totals['removed'] / totals['found'] if totals['found'] else 0
-    headline = f"{totals['found']} {what} found → {totals['remaining']} remaining"
-    st.markdown(f"""
-<div class="us-ba" role="group" aria-label="{headline}">
-  <div><div class="us-ba-cap">Found · {before_id}</div><div class="us-ba-num">{totals['found']}</div></div>
-  <div class="us-ba-arrow">→</div>
-  <div><div class="us-ba-cap">Remaining · {after_id}</div><div class="us-ba-num after">{totals['remaining']}</div></div>
-  <div class="us-ba-text"><div class="us-ba-pct">{pct:.0f}% removed</div>
-    <div class="us-note">{totals['removed']} {what} gone · {totals['new']} new since {before_id}</div></div>
-</div>""", unsafe_allow_html=True)
-
-    left, right = st.columns([3, 2], gap='medium')
-    with left, st.container(border=True):
-        section('What changed', f'Same species within {MATCH_RADIUS_M} m counts as the same plant.')
-        fig = map_figure(after)
-        add_bubbles(fig, after['bubbles'])
-        add_pins(fig, removed, 'Removed', P['removed'], 'circle', 14, outline=P['removed_line'])
-        add_pins(fig, [a for _, a, _ in pairs], 'Still there', P['invasive'], 'x', 14)
-        add_pins(fig, new, 'New', P['new'], 'diamond', 14)
-        chart(fig)
-    with right, st.container(border=True):
-        section('By species')
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width='stretch', column_config={
-            'label': 'Species', 'found': 'Found', 'remaining': 'Remaining', 'removed': 'Removed', 'new': 'New'})
-
-
-def similar_local(all_pins, pin, k=12):
-    target = pin.get('embedding')
-    if not target:
-        return None
-    others = [p for p in all_pins if p.get('embedding') and p['pin_id'] != pin['pin_id']]
-    if not others:
-        return []
-    m = np.array([p['embedding'] for p in others])
-    d = np.linalg.norm(m - np.array(target), axis=1)
-    return [dict(others[i], distance=float(d[i])) for i in np.argsort(d)[:k]]
-
-
-def similar_db(pin_id, k=12):
-    with db_connect() as conn:
-        has = conn.execute('select embedding is not null as e from pins where pin_id = %s', (pin_id,)).fetchone()
-        if not has or not has['e']:
-            return None
-        return conn.execute(
-            'select pin_id, mission_id, label, invasive, confidence, x, y, crop_url, source, '
-            'embedding <-> (select embedding from pins where pin_id = %s) as distance '
-            'from pins where pin_id <> %s and embedding is not null order by distance limit %s',
-            (pin_id, pin_id, k)).fetchall()
-
-
-def page_similar(load, mission_ids, use_db):
-    all_pins = {mid: load(mid) for mid in mission_ids}
-    options = [(mid, p) for mid, m in all_pins.items() for p in m['pins']]
-    if not options:
-        st.info('No pins yet.')
-        return
-    idx = st.selectbox('Plant', range(len(options)),
-                       format_func=lambda i: f"{options[i][1]['pin_id']} · {options[i][1]['label']}")
-    mid, pin = options[idx]
-    flat = [p for m in all_pins.values() for p in m['pins']]
-    results = similar_db(pin['pin_id']) if use_db else similar_local(flat, pin)
-
-    c1, c2 = st.columns([1, 3], gap='medium')
-    with c1, st.container(border=True):
-        src = crop_src(all_pins[mid], pin)
-        if src:
-            st.image(src, width='stretch')
-        st.markdown(f'<div class="us-card-title">{pin["label"]}</div>'
-                    f'<div class="us-card-meta">{pin["pin_id"]} · {pill(pin["invasive"])}</div>',
-                    unsafe_allow_html=True)
-    with c2:
-        if results is None:
-            st.info('This pin has no BioCLIP embedding yet, so these are the same species from other surveys. '
-                    'Run `sync.py --embed` or the AMD deep pass to search by appearance.', icon='🌱')
-            results = [dict(p, distance=None) for p in flat
-                       if p['label'] == pin['label'] and p['pin_id'] != pin['pin_id']]
-        if not results:
-            st.caption('Nothing similar yet.')
-            return
-        cols = st.columns(4)
-        for i, p in enumerate(results[:12]):
-            m = all_pins.get(p['mission_id'], all_pins[mid])
-            s = p.get('crop_url') or crop_src(m, p)
-            dist = f" · d {p['distance']:.3f}" if p.get('distance') is not None else ''
-            with cols[i % 4], st.container(border=True):
-                if s:
-                    st.image(s, width='stretch')
-                st.markdown(f'<div class="us-card-title">{p["label"]}</div>'
-                            f'<div class="us-card-meta">{p["pin_id"]}{dist} · {pill(p["invasive"])}</div>',
-                            unsafe_allow_html=True)
 
 
 # ---------- main ----------
@@ -573,8 +490,16 @@ def page_similar(load, mission_ids, use_db):
 def main():
     inject_css()
     with st.sidebar:
-        st.markdown('<div class="us-brand">Understory</div>'
-                    '<div class="us-brand-sub">Invasive plant survey · Knight Hacks IX</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="us-brand">Understory</div>'
+            '<div class="us-brand-sub">Invasive plant survey</div>'
+            '<div class="us-side-desc">A ground robot surveys places people can\'t easily reach, names the plants it '
+            'sees with open-source AI, and counts the invasive ones, so a re-survey can show that removal worked.</div>'
+            '<div class="us-side-steps">'
+            '<div class="step"><b>Map</b> · LiDAR builds the floor plan as the robot drives.</div>'
+            '<div class="step"><b>Identify</b> · the camera and AI pin each plant, invasive or native.</div>'
+            '<div class="step"><b>Walk through</b> · the Quest headset puts you inside the survey.</div>'
+            '</div><hr class="us-side-rule">', unsafe_allow_html=True)
         has_db = bool(os.environ.get('DATABASE_URL'))
         choice = st.radio('Data source', ['Neon', 'Mission folders'] if has_db else ['Mission folders'],
                           help='Mission folders work offline (pre-synced fallback).')
@@ -592,33 +517,28 @@ def main():
             st.warning('No missions found.')
             return
         mid = st.selectbox('Mission', mission_ids, index=0)
-        st.session_state.sources = st.multiselect(
-            'Pins from', ['live', 'deep'], default=['live'],
-            help='live = the Jetson during the mission; deep = the AMD deep pass afterwards')
+        st.session_state.sources = ['live']
         if not use_db:
             st.caption(f'Reading `{Path(root).relative_to(REPO) if Path(root).is_relative_to(REPO) else root}`')
 
     load = db_mission if use_db else (lambda m: local_mission(root, m))
     mission = load(mid)
+    if any(p.get('source') == 'deep' for p in mission['pins']):
+        with st.sidebar:
+            st.session_state.sources = st.multiselect(
+                'Pins from', ['live', 'deep'], default=['live'],
+                help='live = the Jetson during the mission; deep = the AMD deep pass afterwards')
     source = 'Neon' if use_db else 'Local folders'
+    st.markdown('<div class="us-hero"><div class="us-title">Live stream view of the headset</div></div>',
+                unsafe_allow_html=True)
+    live_camera(height=560)  # the headset wearer's view, full width
+
     st.markdown(f"""
-<div class="us-hero">
-  <div class="us-eyebrow">Mission {mid}</div>
-  <div class="us-title">Understory survey</div>
-  <div class="us-sub">A ground robot maps the site, names the plants it sees, and counts the invasive ones,
-  so a re-survey can show that removal worked.</div>
-  <span class="us-chip">{fmt_time(mission['started_at'])}</span><span class="us-chip mist">{source}</span>
+<div class="us-desc">
+  <span class="us-chip soot">Mission {mid}</span><span class="us-chip">{fmt_time(mission['started_at'])}</span><span class="us-chip mist">{source}</span>
 </div>""", unsafe_allow_html=True)
 
-    tabs = st.tabs(['Survey', 'Sensors', 'Before / after', 'Similar plants'])
-    with tabs[0]:
-        page_overview(mission)
-    with tabs[1]:
-        page_sensors(mission)
-    with tabs[2]:
-        page_before_after(load, mission_ids)
-    with tabs[3]:
-        page_similar(load, mission_ids, use_db)
+    page_overview(mission)
 
 
 main()

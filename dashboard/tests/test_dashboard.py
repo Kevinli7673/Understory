@@ -55,6 +55,10 @@ def test_app_renders_on_fake_data(monkeypatch):
     from streamlit.testing.v1 import AppTest
     monkeypatch.delenv('DATABASE_URL', raising=False)
     monkeypatch.setenv('MISSIONS_DIR', str(FAKE))
+    monkeypatch.setenv('LIVE_RELAY_URL', 'http://127.0.0.1:9')  # nothing listens: live panels show offline
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
+    assert len(at.tabs) == 0  # one page: no Sensors / Before-after / Similar tabs
+    assert [m.label for m in at.metric][:4] == ['Plants pinned', 'Invasive', 'Species', 'Duration']
+    assert any('LiDAR offline' in m.value for m in at.markdown)  # no relay running in tests
+    assert any('Live stream view of the headset' in m.value for m in at.markdown)

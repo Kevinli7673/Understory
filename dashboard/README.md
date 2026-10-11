@@ -22,16 +22,40 @@ in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
   folders on the laptop.
 - **Neon**: shown when `DATABASE_URL` is in `.env`. If Neon can't be reached the app drops back to the folders.
 
-## Pages
+## Page
 
-| Tab | What |
-| --- | --- |
-| Survey | Counts, floor plan (`map.pgm` placed by `map.yaml`) with pins, bubbles and the robot path; pins per species; panorama or frame ring per bubble; pin table with crops |
-| Sensors | Per-sensor heat map (mean per grid cell) over the floor plan, plus the value over time. Missing sensors are skipped, not zero |
-| Before / after | Same label within 0.5 m = same plant. Headline "7 invasive plants found → 1 remaining", per-species table, map of removed / still there / new |
-| Similar plants | pgvector `embedding <-> $1 limit 12` (or numpy on folders). Pins without an embedding fall back to the same species |
+One page: the live headset view across the top, then counts, the survey map (LiDAR map from `map.pgm`/`map.yaml`
+with pins, bubbles, robot path and, when the robot is running, the live LiDAR scan and robot pose, refreshed
+every second), pins per species and the pin table. The sidebar has the site description and the mission picker.
+Sensor readings are still synced to Neon (`readings`) but not shown.
 
-The sidebar "Pins from" filter switches between live (Jetson) pins and `pins_deep.jsonl` from the AMD deep pass.
+## Live: headset view + LiDAR
+
+```
+Quest (HeadsetStreamer.cs) --ws JPEG--> live_relay.py :8770 --ws--> dashboard browser (Headset view)
+Jetson/Pi (scan_bridge.py) --HTTP POST /scan--> live_relay.py <--GET /scan-- dashboard (Survey map, 1 Hz)
+```
+
+```bash
+# laptop, next to the dashboard
+~/.venvs/understory-dashboard/bin/python dashboard/live_relay.py              # port 8770, all interfaces
+~/.venvs/understory-dashboard/bin/python dashboard/fake_live.py               # optional: fake headset + LiDAR
+
+# robot side, inside the ROS container where mapping runs (stdlib only, nothing to install)
+python3 /fetch_ws/src/Understory/dashboard/scan_bridge.py --relay http://<laptop-ip>:8770
+
+# Quest: tell the app where the laptop is, then restart the app (no rebuild once HeadsetStreamer.cs is in a build)
+echo <laptop-ip> > dashboard_ip.txt
+adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/
+```
+
+- `Unity/Assets/Scripts/Util/HeadsetStreamer.cs` creates itself at startup; it is off until `dashboard_ip.txt`
+  exists. 640×360, 8 fps, JPEG 60, newest frame only. Passthrough is not in the stream (the OS composites it),
+  so virtual content shows over Soot.
+- The browser connects to `ws://<dashboard host>:8770/ws/headset`; override with `LIVE_RELAY_WS`. The dashboard
+  server reads scans from `LIVE_RELAY_URL` (default `http://localhost:8770`). `LIVE_FLIP=1` flips the image if
+  it arrives upside down.
+- Everything live is optional: without the relay the panels say offline and the rest works from mission folders.
 
 ## sync.py
 
