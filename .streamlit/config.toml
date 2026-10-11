@@ -1,0 +1,58 @@
+# Theme for dashboard/app.py. Streamlit reads this from the folder you run it in: run from the repo root.
+# Palette: Eucalyptus #98AA9D, Mist #B3C9D6, Plaster #F2EFE2, Soot #2D3536, Moss #697C70.
+[client]
+toolbarMode = "minimal"
+
+[theme]
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap, -apple-system, 'Segoe UI', sans-serif"
+headingFont = "'Space Grotesk':https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap, Inter, sans-serif"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap, Menlo, monospace"
+headingFontWeights = [600, 600, 600, 500, 500, 500]
+baseFontSize = 15
+baseRadius = "1.25rem"
+buttonRadius = "full"
+showWidgetBorder = true
+
+[theme.light]
+primaryColor = "#697c70"
+backgroundColor = "#f2efe2"
+secondaryBackgroundColor = "#e9e6d8"
+textColor = "#2d3536"
+borderColor = "#d9d6c6"
+dataframeBorderColor = "#d9d6c6"
+linkColor = "#55675c"
+codeBackgroundColor = "#dde6ea"
+codeTextColor = "#2d3536"
+greenColor = "#697c70"
+orangeColor = "#2d3536"
+blueColor = "#6b93b0"
+
+[theme.light.sidebar]
+backgroundColor = "#98aa9d"
+secondaryBackgroundColor = "#f2efe2"
+textColor = "#2d3536"
+primaryColor = "#2d3536"
+borderColor = "#7f9386"
+codeBackgroundColor = "#b3c9d6"
+codeTextColor = "#2d3536"
+
+[theme.dark]
+primaryColor = "#98aa9d"
+backgroundColor = "#2d3536"
+secondaryBackgroundColor = "#374142"
+textColor = "#f2efe2"
+borderColor = "#435051"
+dataframeBorderColor = "#435051"
+linkColor = "#b3c9d6"
+codeBackgroundColor = "#374142"
+codeTextColor = "#b3c9d6"
+greenColor = "#98aa9d"
+orangeColor = "#f2efe2"
+blueColor = "#b3c9d6"
+
+[theme.dark.sidebar]
+backgroundColor = "#242b2c"
+secondaryBackgroundColor = "#313a3b"
+textColor = "#f2efe2"
+primaryColor = "#98aa9d"
+borderColor = "#3a4546"

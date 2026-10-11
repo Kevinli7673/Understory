@@ -26,6 +26,7 @@ from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def nav2_installed():
@@ -48,15 +49,24 @@ def generate_launch_description():
         DeclareLaunchArgument('panorama', default_value='true'),
         DeclareLaunchArgument('pose', default_value='true'),
         DeclareLaunchArgument('logger', default_value='true'),
+        # cmd_vel_odom calibration: real speed / commanded speed (drive straight / spin in place and measure)
+        DeclareLaunchArgument('linear_scale', default_value='1.0'),
+        DeclareLaunchArgument('angular_scale', default_value='1.0'),
+        # camera horizontal field of view (rad) written into each bubble; the Quest sizes the photos with it
+        DeclareLaunchArgument('hfov', default_value='0.83'),
     ]
 
+    # pi/slam_toolbox_pi.yaml: understory_nav's config + trust the LiDAR more than the dead-reckoned odom
+    here = os.path.dirname(os.path.realpath(__file__))
     slam = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(
             get_package_share_directory('slam_toolbox'), 'launch', 'online_async_launch.py')),
-        launch_arguments={'slam_params_file': os.path.join(cfg, 'slam_toolbox.yaml'),
+        launch_arguments={'slam_params_file': os.path.join(here, 'slam_toolbox_pi.yaml'),
                           'use_sim_time': 'false'}.items())
 
     odom = Node(package='understory_nav', executable='cmd_vel_odom', name='cmd_vel_odom',
+                parameters=[{'linear_scale': ParameterValue(LaunchConfiguration('linear_scale'), value_type=float),
+                             'angular_scale': ParameterValue(LaunchConfiguration('angular_scale'), value_type=float)}],
                 condition=LaunchConfigurationEquals('odom_source', 'cmd_vel'))
 
     # e-stop > /cmd_vel_teleop > /cmd_vel_auto  ->  /cmd_vel
@@ -90,6 +100,7 @@ def generate_launch_description():
                                {'mission_id': LaunchConfiguration('mission_id')}])
 
     panorama = Node(package='scout_perception', executable='panorama_node', name='panorama_node',
+                    parameters=[{'hfov': ParameterValue(LaunchConfiguration('hfov'), value_type=float)}],
                     condition=IfCondition(LaunchConfiguration('panorama')))
 
     logger = Node(package='scout_perception', executable='logger_node', name='logger_node',

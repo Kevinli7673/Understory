@@ -57,7 +57,7 @@ def test_app_renders_on_fake_data(monkeypatch):
     monkeypatch.setenv('MISSIONS_DIR', str(FAKE))
     at = AppTest.from_file(str(HERE.parent / 'app.py'), default_timeout=60).run()
     assert not at.exception, at.exception
-    assert any('7 invasive plants found → 1 remaining' in m.value for m in at.markdown)
+    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
 
 
 def test_app_reads_the_hugging_face_dataset(monkeypatch, tmp_path):
@@ -82,7 +82,7 @@ def test_app_reads_the_hugging_face_dataset(monkeypatch, tmp_path):
     at.sidebar.radio[0].set_value('Hugging Face').run()
     assert not at.exception, at.exception
     assert calls == [('someone/understory-missions', 'dataset')]
-    assert any('7 invasive plants found → 1 remaining' in m.value for m in at.markdown)
+    assert any('aria-label="7 invasive plants found → 1 remaining"' in m.value for m in at.markdown)
 
 
 def test_sync_without_neon_uploads_to_hugging_face_only(monkeypatch, capsys):

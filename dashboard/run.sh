@@ -10,6 +10,7 @@ if [ "$1" = "--stop" ]; then pkill -f "streamlit run $HERE/app.py" && echo "Dash
 if pgrep -f "streamlit run $HERE/app.py" >/dev/null; then echo "Dashboard already running."; exit 0; fi
 if [ -z "$MISSIONS_DIR" ] && [ -d "$HOME/fetch_ws/missions" ]; then export MISSIONS_DIR=$HOME/fetch_ws/missions; fi
 mkdir -p "$(dirname "$LOG")"
+cd "$HERE/.." || exit 1   # Streamlit reads .streamlit/config.toml (theme, fonts) from the folder it runs in
 nohup "$HERE/.venv/bin/streamlit" run "$HERE/app.py" --server.address 0.0.0.0 --server.port "${PORT:-8501}" \
   --server.headless true --browser.gatherUsageStats false > "$LOG" 2>&1 &
 sleep 4

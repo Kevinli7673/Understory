@@ -5,6 +5,8 @@ Run inside the container (~/scout_shell.sh on the host first), ESP32 plugged int
     python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py
     python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --port /dev/ttyUSB1
     python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --trim 0.8,1.15,1.15,0.8   # even out wheels
+    python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --strafe-fix 0.8      # strafe drifts back/forward
+    python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --no-strafe           # drive + turn only
 
 Firmware and line protocol: firmware/esp32_drive/esp32_drive.ino
     to ESP32:   "C <vx> <vy> <wz>\\n"  (ROS axes, m/s and rad/s), sent for every /cmd_vel message
@@ -19,7 +21,8 @@ re-sending until released (doesn't wait for twist_mux). Stop fake_sensors.py onc
 publishes here.
 
 Port: --port, else the first /dev/serial/by-id device that is NOT the LiDAR (its CP2102N id is in
-scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM*/ttyUSB* likewise.
+scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM* (never ttyUSB*: the LiDAR).
+A by-id --port that is unplugged is waited for, not swapped for another device.
 """
 import argparse
 import glob
@@ -43,16 +46,19 @@ def find_port():
     for p in sorted(glob.glob('/dev/serial/by-id/*')):
         if LIDAR_ID not in p:
             return p
-    for p in sorted(glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')):
+    # Fallback: ttyACM only (the QT Py's native USB). Never ttyUSB*: that is the LiDAR's CP2102N, and right after
+    # a USB re-enumeration its by-id link may not exist yet, so it can't be excluded by id (grabbed it once).
+    for p in sorted(glob.glob('/dev/ttyACM*')):
         if os.path.realpath(p) not in lidar_paths:
             return p
     return None
 
 
 class Esp32Bridge(Node):
-    def __init__(self, port, baud, hold, trim):
+    def __init__(self, port, baud, hold, trim, strafe_fix, no_strafe):
         super().__init__('esp32_bridge')
         self.port_arg, self.baud, self.hold = port, baud, hold
+        self.strafe_fix, self.no_strafe = strafe_fix, no_strafe
         self.trim_line = 'W ' + ' '.join(f'{t:.3f}' for t in trim) + '\n'   # per-wheel speed trim FL FR RL RR
         self.ser = None
         self.buf = b''
@@ -106,7 +112,12 @@ class Esp32Bridge(Node):
     def on_cmd(self, msg):
         if self.estop:
             return
-        self.last_cmd = f'C {msg.linear.x:.3f} {msg.linear.y:.3f} {msg.angular.z:.3f}\n'
+        vx, vy = msg.linear.x, msg.linear.y
+        if self.no_strafe:
+            vy = 0.0
+        else:
+            vx += self.strafe_fix * vy   # cancel the forward/back drift this robot has while strafing
+        self.last_cmd = f'C {vx:.3f} {vy:.3f} {msg.angular.z:.3f}\n'
         self.last_cmd_t = time.monotonic()
         self.write(self.last_cmd)
 
@@ -170,12 +181,15 @@ def main():
                     help='re-send the latest /cmd_vel while it is younger than this (s); bridges Wi-Fi gaps')
     ap.add_argument('--trim', default='1,1,1,1',
                     help='per-wheel speed multipliers FL,FR,RL,RR (0.3-2.0), e.g. 0.8,1.15,1.15,0.8')
+    ap.add_argument('--strafe-fix', type=float, default=0.0,
+                    help='add this x vy to vx: strafe left drifts backward -> positive (try 0.5..1.0), forward -> negative')
+    ap.add_argument('--no-strafe', action='store_true', help='ignore sideways commands (drive + turn only)')
     args = ap.parse_args()
-    trim = [float(t) for t in args.trim.split(',')]
+    trim =[float(t) for t in args.trim.split(',')]
     if len(trim) != 4 or not all(0.3 <= t <= 2.0 for t in trim):
         ap.error('--trim needs 4 numbers between 0.3 and 2.0')
     rclpy.init()
-    node = Esp32Bridge(args.port, args.baud, args.hold, trim)
+    node = Esp32Bridge(args.port, args.baud, args.hold, trim, args.strafe_fix, args.no_strafe)
     try:
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):  # Ctrl+C, or pkill / scout_down.sh
