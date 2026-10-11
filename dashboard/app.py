@@ -573,7 +573,7 @@ def page_similar(load, mission_ids, use_db):
 def main():
     inject_css()
     with st.sidebar:
-        st.markdown('<div class="us-brand">🌿 Understory</div>'
+        st.markdown('<div class="us-brand">Understory</div>'
                     '<div class="us-brand-sub">Invasive plant survey · Knight Hacks IX</div>', unsafe_allow_html=True)
         has_db = bool(os.environ.get('DATABASE_URL'))
         choice = st.radio('Data source', ['Neon', 'Mission folders'] if has_db else ['Mission folders'],
