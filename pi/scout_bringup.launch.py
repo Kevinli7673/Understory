@@ -25,7 +25,9 @@ def generate_launch_description():
                      'brightness': 128}],  # usb_cam defaults to 50 (dark); 128 is the Brio's default
         remappings=[('image_raw', '/camera/image'),
                     ('image_raw/compressed', '/camera/image/compressed'),
-                    ('camera_info', '/camera/camera_info')])
+                    ('camera_info', '/camera/camera_info')],
+        # usb_cam aborts on a bad first frame ("Invalid v4l2 format"), e.g. after the camera resets on USB: retry
+        respawn=True, respawn_delay=2.0)
 
     # understory_nav's nav.launch.py publishes these same two TFs (with measured offsets).
     # When it is running anywhere on the network, start bringup with publish_tf:=false
