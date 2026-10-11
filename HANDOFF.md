@@ -651,6 +651,8 @@ installed on it."*
 - **10:40 PM: the motor shield stopped answering.** `esp32_bridge.log` on the Pi: `shield=MISSING`, `ERROR: I2C to motor shield failed (code 5, 58 so far): loose SDA/SCL/GND wire, or motor noise on the I2C lines`, one more every 2 s. It was `shield=ok` until at least 10:05 PM. Hardware: check the three wires between the QT Py and the shield and the shield's power. Still no `moving=1` in the log.
 - **Memory on the Jetson at 10:43 PM: 860 MB available, no swap.** Firefox had been opened on the Jetson's desktop (about 1 GB) and a second Claude session was running. With the browser closed it was 2.2 GB. Do not browse on the Jetson while the stack runs.
 - For a dry run of the AMD steps before a real mission exists, `fake_data/missions/m1` has 64 frames, a map and bubbles.
+- **Mapping was stuck from 10:14 to 10:55 PM and nothing reported it.** `/pose` had stopped and `tf2_echo map base_link` found no transform. slam_toolbox was running and using CPU, and `map -> odom` was still on `/tf` 30 times a second, but with a time stamp 37 minutes old (measured with `~/fetch_ws/logs/tfcheck.py`), so every lookup failed. `/scan` was 9.5 Hz and `odom -> base_link` was current. Cause not found; the old log is `~/fetch_ws/logs/nav_until_2255.log`. Fix: `docker exec scout pkill -INT -f 'ros2 launch'`, then `~/start_understory.sh` (the map starts again from empty). After it: `map -> odom` under 1.2 s old, `/pose` 10.0 Hz, no node name twice. **If the robot marker in the Quest freezes while the robot moves, do this.**
+- 10:47 PM: the ESP32 is no longer on the Pi's USB (only the LiDAR is listed) and the Quest is not connected.
 
 ## 12. Rules for anyone (or any agent) continuing
 
