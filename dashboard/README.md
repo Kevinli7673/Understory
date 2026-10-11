@@ -11,7 +11,8 @@ python3 -m venv ~/.venvs/understory-dashboard
 ~/.venvs/understory-dashboard/bin/python -m pytest dashboard/tests -q
 ```
 
-Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS or ⋮ → Settings),
+Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS until someone uses the
+small sidebar Dark / Light button, which pins it for the whole server and fades it in place),
 Inter for text and Space Grotesk for headings and numbers (Google Fonts; falls back to system fonts offline). Chart colors are
 in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
 

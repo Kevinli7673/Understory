@@ -20,6 +20,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import streamlit.components.v1 as components
+from streamlit import config as st_config
 from dotenv import load_dotenv
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -65,7 +66,48 @@ SWATCHES = [(EUCALYPTUS, SOOT), (MIST, SOOT), ('#faf8f1', SOOT), (SOOT, PLASTER)
 st.set_page_config(page_title='Understory', page_icon='🌿', layout='wide')
 
 
+# ---------- light / dark toggle ----------
+# .streamlit/config.toml has [theme.light] and [theme.dark]; by default the browser picks one from the OS setting.
+# The sidebar button instead pins one: it clears those sections and sets a single [theme] with that base and
+# colors. Streamlit sends the theme at the start of each full run (before button callbacks), so the click is
+# followed by an immediate st.rerun(), whose run carries the new theme; the browser swaps it in place, no reload.
+# Config is per server, so every open dashboard follows it.
+THEME_SECTIONS = ('theme.light', 'theme.dark', 'theme.light.sidebar', 'theme.dark.sidebar')
+
+
+@st.cache_resource
+def theme_state():
+    """The config.toml theme sections as loaded, and the pinned mode (None = follow the OS)."""
+    return {'snapshot': {sec: {k: v for k, v in st_config.get_options_for_section(sec).items() if v is not None}
+                         for sec in THEME_SECTIONS},
+            'mode': None}
+
+
+def pin_theme(mode):
+    state = theme_state()
+    snap = state['snapshot']
+    for sec in THEME_SECTIONS:
+        for k in snap[sec]:
+            st_config.set_option(f'{sec}.{k}', None)
+    for prefix, src in (('theme', 'theme.'), ('theme.sidebar', 'theme.')):
+        part = '' if prefix == 'theme' else '.sidebar'
+        keys = set(snap[f'{src}light{part}']) | set(snap[f'{src}dark{part}'])
+        chosen = snap[f'{src}{mode}{part}']
+        for k in keys:
+            st_config.set_option(f'{prefix}.{k}', chosen.get(k))
+    st_config.set_option('theme.base', mode)
+    state['mode'] = mode
+
+
+def on_theme_button():
+    pin_theme('light' if theme_name() == 'dark' else 'dark')
+    st.session_state.theme_switched = True
+
+
 def theme_name():
+    pinned = theme_state()['mode']
+    if pinned:
+        return pinned
     try:
         return 'dark' if st.context.theme.type == 'dark' else 'light'
     except Exception:
@@ -85,6 +127,8 @@ def inject_css():
 <style>
 .block-container {{ padding-top: 2rem; max-width: 1380px; }}
 [data-testid="stDecoration"] {{ display: none; }}
+.stApp, .stApp div, .stApp p, .stApp span, .stApp label, .stApp button, [data-testid="stSidebar"] {{
+  transition: background-color .45s ease, color .45s ease, border-color .45s ease, box-shadow .45s ease; }}
 
 .us-hero {{ background: {MOSS}; border-radius: 28px; padding: 1.6rem 2.4rem; margin: 0 0 1rem 0;
             box-shadow: 0 10px 30px rgba(45,53,54,0.12); }}
@@ -133,6 +177,9 @@ def inject_css():
 .us-side-steps .step {{ font-size: .85rem; line-height: 1.45; color: {P['side_text']}; padding: .55rem .8rem; margin-bottom: .4rem;
                      background: {P['side_card']}; border-radius: 14px; }}
 .us-side-steps b {{ font-family: {DISPLAY}; font-weight: 600; }}
+.st-key-theme_btn button {{ min-height: 0; padding: .1rem .55rem; border-radius: 999px; opacity: .7; }}
+.st-key-theme_btn button p {{ font-size: .78rem; font-weight: 500; letter-spacing: .04em; }}
+.st-key-theme_btn button:hover {{ opacity: 1; background: {P['side_card']}; }}
 .us-side-rule {{ border: 0; border-top: 1px solid rgba(45,53,54,0.18); margin: .2rem 0 1rem; }}
 </style>
 """, unsafe_allow_html=True)
@@ -488,6 +535,8 @@ def page_overview(mission):
 # ---------- main ----------
 
 def main():
+    if st.session_state.pop('theme_switched', False):
+        st.rerun()  # this run's theme message predates the click; the rerun's carries the new theme
     inject_css()
     with st.sidebar:
         st.markdown(
@@ -500,6 +549,9 @@ def main():
             '<div class="step"><b>Identify</b> · the camera and AI pin each plant, invasive or native.</div>'
             '<div class="step"><b>Walk through</b> · the Quest headset puts you inside the survey.</div>'
             '</div><hr class="us-side-rule">', unsafe_allow_html=True)
+        dark = theme_name() == 'dark'
+        st.button('Light' if dark else 'Dark', icon=':material/light_mode:' if dark else ':material/dark_mode:',
+                  key='theme_btn', type='tertiary', on_click=on_theme_button)
         has_db = bool(os.environ.get('DATABASE_URL'))
         choice = st.radio('Data source', ['Neon', 'Mission folders'] if has_db else ['Mission folders'],
                           help='Mission folders work offline (pre-synced fallback).')
