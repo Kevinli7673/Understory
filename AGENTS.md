@@ -14,7 +14,7 @@ Honest framing: an indoor mecanum robot on the venue floor stands in for the fie
 
 ## Current status
 
-_Updated Sat Oct 10, ~6:20 PM._
+_Updated Sat Oct 10, ~7 PM._
 
 - **Quest ↔ Pi works (Sat ~6:20 PM):** the headset connected live to the Pi's ros_tcp_endpoint; real camera + LiDAR map on the table. **The Pi is now on Kevin's hotspot "iPhone (2)" at `172.20.10.3`** (was `172.20.10.10` on the other iPhone; switch back with `sudo nmcli dev wifi connect "<ssid>" password ...`). Quest: panel → Robot address.
 - **Kevin (Quest app):** **Headset build works** (Quest 3S, OpenXR + Meta Quest, `com.knighthacks.understory`; first IL2CPP build ~13 min, then faster). Unity 6 (`6000.4.9f1`, URP) at `Unity/`: Meta XR SDK 207, Android, ROS-TCP-Connector (ROS2 define set). Contract classes + `RosCoords` in `Assets/Scripts/Contracts/`. `fake_data/` (m1 before / m2 after, run `python fake_data/generate.py`) replayed by `FakeSurveySource` → `SurveyHub`. `BubbleRingBuilder` + `TabletopMap` + `ViewSwitcher` (A / Tab, click a disc) tested in the editor, merged to `main`.
@@ -28,6 +28,34 @@ _Updated Sat Oct 10, ~6:20 PM._
   - **Jetson IP on the headset:** in VR: panel **Robot address** → keypad → Connect (saved, reconnects immediately). Or: `echo <ip> > ros_ip.txt && adb push ros_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/`, restart the app. Table status line shows `LIVE <ip>` / `FAKE · connecting <ip>`.
 - **Open (Kevin → Alvaro), proposed:** `/voice/audio` = `std_msgs/UInt8MultiArray` whose `data` is a complete **WAV file, 16 kHz mono 16-bit** (Quest `PushToTalk`: hold X, release to send). Whisper node: `wave` + numpy reads it directly (skip faster-whisper's PyAV decoder, it breaks on newer `av`) → transcribe with `initial_prompt` listing the commands (short clips get misheard: "Start survey" came out "Sorry, survey." without it) → publish the text on `/voice/text`. Reference: `transcribe()` / `command_from_text()` in `tools/quest_mock_endpoint.py`. `tools/quest_mock_endpoint.py` saves received clips to `%TEMP%/understory_voice_last.wav` for testing.
 - **Done:** `panorama_node` always publishes every frame (`<bubble_id>/<index>`) and adds the stitched pano only as an extra; the Quest shows the frame ring (exact yaws) and uses the pano only when no frames arrive.
+
+## Open software work (Sat ~7 PM)
+
+Check `HANDOFF.md` section 1 for the Pi/Jetson details. Owners as in "Components and owners" below.
+
+**Blocking the demo**
+- **Robot driving on hardware** (Kevin / Teammate 4): flash `firmware/esp32_drive` (Arduino IDE, Adafruit Motor
+  Shield V2 library), bench-test with wheels up (`C 0.1 0 0` in the Serial Monitor, fix `WHEEL_DIR`), then plug into
+  the Pi; `scout_up.sh` starts `esp32_bridge.py`. Then Quest sticks / e-stop / 360° capture work for real.
+- **Whisper with a real Quest clip** (Alvaro + Kevin): works with synthetic speech on the Pi; never tried with the
+  headset's push-to-talk (hold X) end to end.
+- **Pi + Jetson together** (Alvaro): never tried. The Pi throttles at 83 °C with the AI on; mapping/nav/AI should move
+  to the Jetson (TensorRT detector already 15 Hz there).
+- **Record a real mission** (`logger_node`, everyone): needed by the dashboard, a real before/after, and the splat.
+  Plan a "before" run and an "after" run tonight; keep it as the pre-synced fallback.
+
+**Makes it much better**
+- **LiDAR odometry** (Teammate 3): odom is dead-reckoned from `/cmd_vel`, so carrying the robot doesn't move it and
+  mecanum slip will drift. `rf2o_laser_odometry` + `odom_source:=external`.
+- **Sensor pod** (Teammate 4): Grove sensors in `readSensors()` in `firmware/esp32_drive` (keys as in `/survey/readings`);
+  then stop `fake_sensors.py`.
+
+**Cloud and demo**
+- **`sync.py` + Neon + Streamlit dashboard** (Fullstack): not in the repo. Build against `fake_data/missions/m1` and
+  `m2` now (before/after: same label within 0.5 m → "7 found → 1 remaining").
+- **AMD on the W7900** (Teammate 3 / Kevin): `amd/deep_pass.py` and the splat (`splat/setup_amd.sh`, `run.sh`) have
+  not run on ROCm yet. Splat output `splat/out/<id>/scene.splat` shows up in the Quest's "3D model" button.
+- **Devpost** (everyone): write-up, headset video (record the robot-free demo now as a backup), pitch.
 
 ## Hackathon rules that affect code
 
