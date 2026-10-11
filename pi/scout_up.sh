@@ -103,7 +103,11 @@ echo "Waiting for nodes, then measuring rates (~15 s)..."
 sleep 5
 for topic in /scan /camera/image/compressed; do
   rate=$(in_scout "timeout 8 ros2 topic hz $topic 2>/dev/null" | grep 'average rate' | tail -1 | awk '{print $3}')
-  if [ -n "$rate" ]; then echo "  $topic: $rate Hz"; else warn "$topic is NOT publishing"; fi
+  if [ -n "$rate" ]; then echo "  $topic: $rate Hz"
+  elif [ "$topic" = /scan ] && ! ls /dev/serial/by-id/*"$LIDAR_ID"* >/dev/null 2>&1; then
+    # the LiDAR node does not find the device again by itself once it has been unplugged
+    warn "/scan is NOT publishing: the LiDAR is not plugged in. Plug it in, then ~/scout_down.sh --keep && ~/scout_up.sh"
+  else warn "$topic is NOT publishing"; fi
 done
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   state=$(in_scout "timeout 5 ros2 topic echo /mission/state --once --field data 2>/dev/null" | head -1)
@@ -123,5 +127,7 @@ done
 
 # files the container creates are root-owned; hand them back to the host user
 docker exec scout chown -R "$(id -u):$(id -g)" /fetch_ws/logs
-echo "Done. Quest: ROS IP 172.20.10.10 port 10000 | Foxglove: ws://172.20.10.10:8765 | shell: ~/scout_shell.sh"
+# the address depends on which phone's hotspot the Pi joined (.10 on Alvaro's, .3 on Kevin's), so print the real one
+ip=$(grep -o '172\.20\.10\.[0-9]*' <<<"$ips" | head -1); ip=${ip:-THIS_MACHINE}
+echo "Done. Quest: ROS IP $ip port 10000 | Foxglove: ws://$ip:8765 | shell: ~/scout_shell.sh"
 echo "Plant AI on this machine (slow on the Pi, about 1 frame every 4 s): ~/scout_ai_up.sh"

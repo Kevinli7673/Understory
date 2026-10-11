@@ -1,6 +1,6 @@
 # Understory handoff: Pi + Jetson (perception, bringup, AI)
 
-Written Sat Oct 10 2026, last updated about 12:30 PM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
+Written Sat Oct 10 2026, last updated about 8:40 PM EDT, on the Pi. **Submission is Sun Oct 11, 9:30 AM EDT.**
 
 This file is for Alvaro (perception lead) and for any coding agent picking the work up on either the
 Raspberry Pi or the Jetson Orin Nano. It covers what exists, what was tested and how, how to run it,
@@ -27,9 +27,9 @@ follow the rules in section 12.
 | Pi temperature with the AI running | **Too hot** | 83 °C and thermally throttled after 5 minutes (section 5) |
 | Jetson | **Nothing has run on it** | `jetson_up.sh` only passed a dry run on the Pi |
 | Pi and Jetson together | **Never tried** | |
-| Robot driving | **Code written, not tried on hardware** | Kevin's `firmware/esp32_drive` and `pi/scripts/esp32_bridge.py` (Sat 5 PM). `scout_up.sh` starts the bridge when the board is plugged in; that part is untested too |
+| Robot driving | **Bridge talks to the board; wheels not driven yet** | Sat 8:29 PM on the Pi: `scout_up.sh` found the QT Py ESP32-S2, started `esp32_bridge.py`, and the firmware answered `shield=ok moving=0`. The bridge is subscribed to `/cmd_vel` from the Jetson's twist_mux. No drive command has been sent (session 11) |
 | `/sensors` from the ESP32 | **Bridge republishes it; no sensor is wired in the firmware yet** | `fake_sensors.py` stands in |
-| Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. **No human voice and no Quest clip tried yet** |
+| Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. The command prompt and confidence floor are on the Pi too (session 11). **No human voice tried yet** |
 | NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
 | Mission logger (`logger_node`) | Works with fake data | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). No real mission logged yet |
 | AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
@@ -51,7 +51,7 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 
 | Machine | Role | Address |
 | --- | --- | --- |
-| Raspberry Pi 5 (on the robot) | LiDAR, camera, Foxglove, Quest endpoint. Can also run everything | `172.20.10.10`, user `a1vcm` |
+| Raspberry Pi 5 (on the robot) | LiDAR, camera, Foxglove, Quest endpoint. Can also run everything | `172.20.10.3` on Kevin's hotspot "iPhone (2)" (Sat 8:20 PM); `172.20.10.10` on "Alvaro's iPhone". User `a1vcm`. `scout_up.sh` prints the current one |
 | Jetson Orin Nano (on the table, wall power) | Mapping, Nav2, mission, panorama, AI | needs a `172.20.10.x` address |
 | Quest 3 | Unity app | connects to **the Pi**, `172.20.10.10:10000` |
 
@@ -611,6 +611,17 @@ installed on it."*
 - Not pushed: the Jetson has no GitHub login and the Pi could not be reached. `jetson-bringup` is ahead of `origin` by the merge and this session's commit.
 - **For Kevin: `splat/align.py` is an empty file at the tip of every branch**, and `mast3r_poses.py` imports `align_sim3`, `apply_to_points` and `apply_to_pose` from it. As it stands the MASt3R step fails at import, so `splat/run.sh` always falls through to the Depth Anything point cloud, and `python -m pytest splat/tests` fails to collect. The first commit has a 1.5 KB version, emptied by the "rescue: uncommitted work" commit: look at `git show 304f251:splat/align.py` before restoring it. Not touched (`splat/` is his).
 - Left on disk, safe to delete: `~/fetch_ws/logs/deep_test/` (the photo test mission).
+
+**Session 11, Sat 8:20 to 8:40 PM, on the Pi.** *"Read the repo and implement the changes asked for in the handoff."* Branch `pi-session-11`. The Pi had rebooted at 8:16 PM and was on `main` at PR #7, running sensors, endpoint, Foxglove and Whisper.
+- **Network.** The Pi is on Kevin's hotspot "iPhone (2)" at `172.20.10.3`, 5 GHz, clock within seconds of GitHub's. From 8:26 PM the Jetson's whole stack was visible from the Pi (slam_toolbox, Nav2, mission manager, panorama, logger, `pose_from_tf`, detector, species, localizer), so **both machines are on the same hotspot again**. Arriving on the Pi: `/mission/state` `IDLE`, `/detections` 8.2 Hz, `/map` 174x305, `/pose` about 4 Hz (10 Hz is sent). `tf2_echo map base_link` on the Pi found no `map` frame in 8 s; nothing on the Pi needs it.
+- **The two-slam guard works.** `~/scout_up.sh --nav` on the Pi printed "slam_toolbox is already running on another machine" and started nothing. The Pi stays in sensors + Whisper mode.
+- **Whisper prompt and confidence floor, on the Pi** (session 10 left this open). ROS domain 43, the synthetic clips: "start survey", "stop", "come back home", "take a picture", "manual", "keep going" all published (scores -0.18 to -0.67, 2.5 to 2.8 s each, 7.3 s for the first); the noise clip came out as "start survey" with score -1.69 and was dropped; silence was ignored. The live node was started after the pull, so it runs this code. Still no human voice.
+- 33 `scout_perception` tests and 12 `understory_nav` tests pass on the Pi. `logger_node` and `ai_node` are already in the Pi's install.
+- **ESP32 bridge, first contact with the board.** At about 8:29 PM someone plugged in the Adafruit QT Py ESP32-S2. `scout_up.sh` picked it (not the LiDAR), started `esp32_bridge.py`, and the log shows the port open at 115200 and the firmware's line `# status shield=ok moving=0 cmd=(0.00 0.00 0.00) cmds=0`. `/cmd_vel` has one publisher (the Jetson's twist_mux) and the bridge subscribed. **No drive command was sent from here**, so wheels turning is still unproven. `/sensors` has a publisher and no data (no sensor in the firmware).
+- **The LiDAR was unplugged at the same moment** (kernel log: its CP2102 disconnected at 8:28 PM, the ESP32 appeared 40 s later), so `/scan` stopped and the Jetson's mapping has no scans. The LiDAR node does not recover by itself: plug the LiDAR back in, then `~/scout_down.sh --keep && ~/scout_up.sh` on the Pi. **Still unplugged at 8:40 PM.** If the Pi has too few free USB ports for LiDAR + camera + ESP32, that needs a hub.
+- `scout_up.sh`: the last line printed `172.20.10.10` whatever the address was; it now prints the Pi's real hotspot address. A missing `/scan` with no LiDAR on USB now says so and gives the fix.
+- Not fixed: the Pi's `scout-ai` container predates `--init`, so a stopped node stays as a zombie that `pgrep` still counts (one `whisper_node` zombie from the test above). `docker rm -f scout-ai` and `~/scout_ai_up.sh --voice-only` would recreate it; not done while the stack is in use. `jetson_up.sh` still names `172.20.10.10` in two messages.
+- Left running at 8:40 PM on the Pi: camera 14.8 Hz, endpoint, Foxglove, Whisper, ESP32 bridge. LiDAR node running with no device.
 
 ## 12. Rules for anyone (or any agent) continuing
 
