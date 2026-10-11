@@ -3,10 +3,17 @@
 `sync.py` (mission folder → HF Hub + Neon) and the Streamlit dashboard for land managers.
 
 ```bash
-python3 -m venv dashboard/.venv && dashboard/.venv/bin/pip install -r dashboard/requirements.txt
-dashboard/.venv/bin/streamlit run dashboard/app.py          # http://localhost:8501
-dashboard/.venv/bin/python -m pytest dashboard/tests -q
+# keep the venv OUT of the repo if it lives in iCloud Drive (Desktop/Documents): syncing it stalls Python
+python3 -m venv ~/.venvs/understory-dashboard
+~/.venvs/understory-dashboard/bin/pip install -r dashboard/requirements.txt
+# from the repo root, so .streamlit/config.toml (theme, fonts) is used
+~/.venvs/understory-dashboard/bin/streamlit run dashboard/app.py      # http://localhost:8501
+~/.venvs/understory-dashboard/bin/python -m pytest dashboard/tests -q
 ```
+
+Theme: the Eucalyptus / Mist / Plaster / Soot / Moss palette, light or dark (follows the OS or ⋮ → Settings),
+Inter for text and Space Grotesk for headings and numbers (Google Fonts; falls back to system fonts offline). Chart colors are
+in `PALETTES` in `app.py`; keep them in sync with `.streamlit/config.toml`.
 
 ## Data source
 
@@ -29,9 +36,9 @@ The sidebar "Pins from" filter switches between live (Jetson) pins and `pins_dee
 ## sync.py
 
 ```bash
-dashboard/.venv/bin/python dashboard/sync.py missions/m1 missions/m2            # HF + Neon
-dashboard/.venv/bin/python dashboard/sync.py missions/m1 --no-hf                # Neon only
-dashboard/.venv/bin/python dashboard/sync.py fake_data/missions/m1 --dry-run    # just read and count
+~/.venvs/understory-dashboard/bin/python dashboard/sync.py missions/m1 missions/m2            # HF + Neon
+~/.venvs/understory-dashboard/bin/python dashboard/sync.py missions/m1 --no-hf                # Neon only
+~/.venvs/understory-dashboard/bin/python dashboard/sync.py fake_data/missions/m1 --dry-run    # just read and count
 ```
 
 `.env` (never committed): `DATABASE_URL=postgresql://...neon.tech/...?sslmode=require`, `HF_TOKEN=hf_...`,
