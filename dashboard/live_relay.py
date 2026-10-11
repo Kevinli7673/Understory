@@ -80,7 +80,7 @@ async def headset_sub(request):
                 break
             sent = relay.frame_id
             await ws.send_bytes(relay.frame)
-    except (ConnectionResetError, asyncio.CancelledError):
+    except (ConnectionError, asyncio.CancelledError):  # aiohttp raises a plain ConnectionError on a lost viewer
         pass
     finally:
         relay.viewers.discard(ws)

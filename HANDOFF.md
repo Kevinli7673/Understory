@@ -34,7 +34,7 @@ follow the rules in section 12.
 | Mission logger (`logger_node`) | Works with fake data; live pins and crops written Sat night | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). Live: 12 pins and crops in `missions/m1`, all false alarms, no bubble captured yet (session 10, continued) |
 | AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
 | Dashboard (one-page design with the live headset view and live LiDAR) | Runs on the Jetson, `http://<Jetson IP>:8501`; `dashboard/run.sh` starts it, the live relay (`:8770`) and the LiDAR bridge | Sun 3:25 AM: 13 tests pass; folder and Hugging Face sources render; real LiDAR scans reach the page (session 12) |
-| Headset view on the dashboard | **Relay works with test frames. The Quest has not sent a frame** | 24 test JPEGs through the WebSocket over the hotspot, all received. Needs the Quest steps in section 8a |
+| Headset view on the dashboard | **Works with the real Quest** (Kevin, Sun about 4 to 5 AM): fixed table view, 960x540 | the relay still held a 960x540 frame from the Quest at 8:20 AM. **The addresses changed Sun 8:20 AM: section 8a** |
 | Hugging Face dataset `a1vcm/understory-missions` (private) | Holds the two **fake** missions m1 and m2 | uploaded Sat 11:40 PM; downloaded by the dashboard Sun 1:40 AM |
 | Neon sync | **Not run**: no `DATABASE_URL` in `.env` | |
 
@@ -381,7 +381,9 @@ relay (`dashboard/live_relay.py`), and every browser that has the dashboard open
 Quest (HeadsetStreamer.cs) --ws JPEG--> relay on the Jetson, port 8770 --ws--> dashboard in a browser
 ```
 
-The Jetson side is running (`dashboard/run.sh`, Sun 3:25 AM). The relay is at **`172.20.10.4:8770`**. Three steps on your side:
+**Sun 8:20 AM: both machines are on the hotspot "Alvaro's iPhone" and their addresses changed. The Jetson (dashboard, relay) is `172.20.10.11`; the Pi (robot, `ros_ip.txt`) is `172.20.10.10`.** The Quest must join that hotspot, and both files on it must be pushed again with the new addresses (step 2). The phone can hand out different addresses after a reboot: `hostname -I` on each machine gives the current one.
+
+The Jetson side is running (`dashboard/run.sh`). The relay is at **`172.20.10.11:8770`**. Three steps on your side:
 
 1. **Get the code and build.** `git pull` on `main` once PR #15 is merged, or check out `hf-hub-handoff` now. The
    script is `Unity/Assets/Scripts/Util/HeadsetStreamer.cs`. It adds itself at startup; nothing to place in the scene.
@@ -389,18 +391,18 @@ The Jetson side is running (`dashboard/run.sh`, Sun 3:25 AM). The relay is at **
    without Unity in focus: `bash tools/check_unity_scripts.sh`. Then build and install the APK as usual.
 2. **Tell the app where the relay is.** With the Quest on USB:
    ```bash
-   echo 172.20.10.4 > dashboard_ip.txt
+   echo 172.20.10.11 > dashboard_ip.txt
    adb push dashboard_ip.txt /sdcard/Android/data/com.knighthacks.understory/files/
    ```
-   This file is separate from `ros_ip.txt` (the robot, `172.20.10.3`). It survives app updates; push it again only if
+   This file is separate from `ros_ip.txt` (the robot, now `172.20.10.10`). It survives app updates; push it again only if
    the Jetson's address changes (`hostname -I` on the Jetson). A full `ws://host:port/path` in the file also works.
    Without the file the streamer stays off and the app behaves as before.
 3. **Restart the app, then check.**
-   - `adb logcat -s Unity | grep HeadsetStreamer` should print `streaming to ws://172.20.10.4:8770/ws/headset/pub`.
+   - `adb logcat -s Unity | grep HeadsetStreamer` should print `streaming to ws://172.20.10.11:8770/ws/headset/pub`.
      `off: no dashboard_ip.txt in ...` means step 2 did not land in that folder.
-   - `http://172.20.10.4:8770/health` in any browser: `headset_publishers` should be 1 and `frame_age` under 1.
-   - `http://172.20.10.4:8770/headset.jpg` shows the newest frame by itself.
-   - `http://172.20.10.4:8501`: the top panel changes from "Waiting for the headset" to the picture with "live · 8 fps".
+   - `http://172.20.10.11:8770/health` in any browser: `headset_publishers` should be 1 and `frame_age` under 1.
+   - `http://172.20.10.11:8770/headset.jpg` shows the newest frame by itself.
+   - `http://172.20.10.11:8501`: the top panel changes from "Waiting for the headset" to the picture with "live · 8 fps".
 
 Things to know:
 - The stream is 960x540, 8 frames a second, JPEG quality 70, 55° vertical view, head motion smoothed (fields on the component). Passthrough is not in it,
