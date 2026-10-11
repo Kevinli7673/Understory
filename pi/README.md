@@ -35,7 +35,7 @@ files in `~/fetch_ws` are symlinks into this folder.
 ~/scout_up.sh --nav
 ```
 
-Quest: ROS IP `172.20.10.10`, port `10000`. Foxglove: `ws://172.20.10.10:8765`.
+Quest: ROS IP = the Pi's address, port `10000`; Foxglove: `ws://<Pi address>:8765`. `scout_up.sh` prints the address when it finishes (`172.20.10.3` on Sat evening, `172.20.10.10` before that; the phone decides).
 
 Drive the mission by publishing words on `/voice/text` (`start`, `stop`, `return`, `manual`, `capture`, `resume`):
 

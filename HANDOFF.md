@@ -51,9 +51,9 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 
 | Machine | Role | Address |
 | --- | --- | --- |
-| Raspberry Pi 5 (on the robot) | LiDAR, camera, Foxglove, Quest endpoint. Can also run everything | `172.20.10.10`, user `a1vcm` |
+| Raspberry Pi 5 (on the robot) | LiDAR, camera, Foxglove, Quest endpoint. Can also run everything | **`172.20.10.3` since Sat evening** (was `172.20.10.10`; the phone assigns it, `scout_up.sh` prints it), user `a1vcm` |
 | Jetson Orin Nano (on the table, wall power) | Mapping, Nav2, mission, panorama, AI | needs a `172.20.10.x` address |
-| Quest 3 | Unity app | connects to **the Pi**, `172.20.10.10:10000` |
+| Quest 3 | Unity app | connects to **the Pi**, port 10000, at the address above |
 
 - Hotspot: "Alvaro's iPhone". The Pi falls back to `eduroam2` if the phone is not in range at boot.
   Fix: `sudo nmcli con up hotspot`.
@@ -608,8 +608,10 @@ installed on it."*
 - **A mistake to know about:** at 7:50 PM `~/start_understory.sh` started mapping, Nav2 and the mission manager on the Jetson while the Pi was off the network. The Pi then appeared for about two minutes with **its own** `scout_up.sh --nav` stack and a Quest connected, so two slam_toolbox, mission manager and twist_mux instances were on the network for that time. The Jetson's launch was stopped at about 8:05 PM. **While the Pi runs `--nav`, do not run `jetson_up.sh` without `~/scout_down.sh --keep && ~/scout_up.sh` on the Pi first.** `jetson_up.sh` checks for this, but cannot see a Pi that is off the network at that moment.
 - **Network, unresolved.** The Jetson is on "Alvaro's iPhone" (`172.20.10.11`). The Pi answered at neither `.10` nor `.3` for most of the session, was visible at `.3` from about 7:51 to 8:05 PM, then gone again. Both phones hand out `172.20.10.x`, so the Pi may be moving between them. Pi and Jetson must be on the same hotspot.
 - Left running at 8:20 PM on the Jetson: `ai_node` (TensorRT detector), localizer, `logger_node`, memory guard, power logger. Not running here: mapping, Nav2, mission, panorama (the Pi has them).
-- Not pushed: the Jetson has no GitHub login and the Pi could not be reached. `jetson-bringup` is ahead of `origin` by the merge and this session's commit.
-- **For Kevin: `splat/align.py` is an empty file at the tip of every branch**, and `mast3r_poses.py` imports `align_sim3`, `apply_to_points` and `apply_to_pose` from it. As it stands the MASt3R step fails at import, so `splat/run.sh` always falls through to the Depth Anything point cloud, and `python -m pytest splat/tests` fails to collect. The first commit has a 1.5 KB version, emptied by the "rescue: uncommitted work" commit: look at `git show 304f251:splat/align.py` before restoring it. Not touched (`splat/` is his).
+- **For Kevin (fixed later, see below): `splat/align.py` was an empty file at the tip of every branch**, and `mast3r_poses.py` imports `align_sim3`, `apply_to_points` and `apply_to_pose` from it. As it stands the MASt3R step fails at import, so `splat/run.sh` always falls through to the Depth Anything point cloud, and `python -m pytest splat/tests` fails to collect. The first commit has a 1.5 KB version, emptied by the "rescue: uncommitted work" commit: look at `git show 304f251:splat/align.py` before restoring it. Not touched (`splat/` is his).
+- **8:18 to 8:50 PM, pushed, merged, both machines restarted.** The Pi came back on Alvaro's hotspot at **`172.20.10.3`** (older entries in this file say `.10`). `jetson-bringup` was pushed through the Pi and merged into `main` as **PR #7**. The Pi pulled `main`, rebuilt, 33 tests pass there; nothing was running on it, so `~/scout_up.sh` and `~/scout_ai_up.sh --voice-only` were started (`/scan` 10.0 Hz, camera 15.0 Hz, Whisper with the new prompt and floor). No ESP32 was plugged in, so the bridge did not start. Then `~/start_understory.sh` on the Jetson: one each of slam_toolbox, mission manager, twist_mux, panorama, logger and pose publisher on the network, `/mission/state` `IDLE`, `/pose` 8.8 Hz, `/detections` 7.6 Hz, 2.0 GB available.
+- **Fixed after that (PR #8):** `scout_up.sh` printed `172.20.10.10` whatever the Pi's address was; it now prints the real one. Both start scripts ask for the node list without the ROS daemon's cache before deciding that no other mapping stack is running. `splat/align.py` restored from commit `304f251` (it was emptied by the "rescue" commit): `splat/tests` 7 pass. **Kevin should check that restored file is the version he wants.**
+- Git push from the Pi over SSH needs `git -c credential.helper='!gh auth git-credential' push origin <branch>`; a plain `git push` there fails with "could not read Username".
 - Left on disk, safe to delete: `~/fetch_ws/logs/deep_test/` (the photo test mission).
 
 ## 12. Rules for anyone (or any agent) continuing

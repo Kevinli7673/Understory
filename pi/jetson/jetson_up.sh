@@ -6,7 +6,7 @@
 # Safe to re-run. First-time setup (loading the image, cloning the repo) is in pi/README.md.
 #
 #   ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
-#   SCOUT_PEER=172.20.10.10 .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
+#   SCOUT_PEER=<Pi IP> .../jetson_up.sh        # if the Pi's topics don't show up (see step 4)
 #   NO_AI=1 .../jetson_up.sh                        # mapping + mission only, no plant AI
 #   The plant AI uses the image scout-ros-ai-gpu when it exists (build: pi/jetson/Dockerfile.gpu, HANDOFF.md),
 #   with AI_ONE_PROCESS=1 and WHISPER_MODEL=none, and the TensorRT detector (DETECTOR_BACKEND=nanoowl_trt) when
@@ -23,7 +23,7 @@ in_scout() { docker exec $PEER scout bash -c "$SRC && $1"; }
 echo "Date: $(date)   <- compare with 'date' on the Pi"
 ips=$(hostname -I)
 echo "IPs:  $ips"
-grep -q '172\.20\.10\.' <<<"$ips" || warn "Not on the iPhone hotspot (no 172.20.10.x address). The Pi is at 172.20.10.10."
+grep -q '172\.20\.10\.' <<<"$ips" || warn "Not on the iPhone hotspot (no 172.20.10.x address). The Pi prints its own address when ~/scout_up.sh runs."
 
 # --- 2. container ---
 if ! docker image inspect scout-ros >/dev/null 2>&1; then
@@ -60,14 +60,16 @@ if [ -n "$rate" ]; then
 else
   warn "Cannot see /scan. Is ~/scout_up.sh running on the Pi? If yes, discovery is blocked. Run
     Pi:     ~/scout_down.sh --keep && SCOUT_PEER=<this Jetson's 172.20.10.x IP> ~/scout_up.sh
-    Jetson: SCOUT_PEER=172.20.10.10 $0"
+    Jetson: SCOUT_PEER=<the Pi's 172.20.10.x IP> $0"
   exit 1
 fi
 
 # --- 5. mapping + mission + panorama ---
 if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   echo "Nav already running here."
-elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
+# --no-daemon: the ROS daemon's cached list missed a Pi that had just rejoined the network (Sat 7:50 PM),
+# and a second mapping stack was started beside the Pi's
+elif in_scout "timeout 12 ros2 node list --no-daemon --spin-time 6" | grep -q slam_toolbox; then
   warn "slam_toolbox is already running on the Pi. Stop it there first (~/scout_down.sh --keep && ~/scout_up.sh), then re-run this."
   # the mission still has to be written to disk; the logger only listens, so it is safe beside the Pi's stack
   if ! in_scout "timeout 5 ros2 node list" | grep -q logger_node; then
