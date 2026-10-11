@@ -12,7 +12,22 @@ python amd/deep_pass.py missions/m1         # OWLv2 large + BioCLIP on every fra
 bash splat/run.sh missions/m1               # the 3D model (see splat/README.md)
 ```
 
-Getting a mission there: the logger node writes `~/fetch_ws/missions/<id>/` on the machine that runs
+**Through the Hugging Face dataset (no route between the Jetson and the box needed).** `dashboard/sync.py`
+uploads a mission folder to the dataset named in `HF_DATASET_REPO`. On the box, with `HF_DATASET_REPO` and
+`HF_TOKEN` in `.env` at the repo root (or exported):
+
+```bash
+bash amd/run_all.sh m1        # pull m1 from the dataset, deep pass, splat, push the results back
+```
+
+That is `python amd/hub.py pull m1`, the two commands above, then `python amd/hub.py push missions/m1`.
+`push` sends only `pins_deep.jsonl`, `crops_deep/`, `deep_report.json` and `splat/out/m1/scene.splat` +
+`scene.ply`; the live pins are never sent back. The dashboard and the Quest's 3D model button read those
+names. `SKIP_SPLAT=1` leaves the splat out; if the splat fails the deep pass is still pushed. Written Sat
+night and **not run against a real dataset yet** (no token on the Jetson); the unit tests cover the file
+lists and the `.env` reading only.
+
+Copying by hand works too: the logger node writes `~/fetch_ws/missions/<id>/` on the machine that runs
 mapping (the Jetson). Copy that folder to the box, for example
 `rsync -a ~/fetch_ws/missions/m1 root@<box>:Understory/missions/`.
 
