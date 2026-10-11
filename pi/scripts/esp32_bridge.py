@@ -21,7 +21,8 @@ re-sending until released (doesn't wait for twist_mux). Stop fake_sensors.py onc
 publishes here.
 
 Port: --port, else the first /dev/serial/by-id device that is NOT the LiDAR (its CP2102N id is in
-scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM*/ttyUSB* likewise.
+scout_bringup.launch.py, and many ESP32 boards use the same chip), else /dev/ttyACM* (never ttyUSB*: the LiDAR).
+A by-id --port that is unplugged is waited for, not swapped for another device.
 """
 import argparse
 import glob
@@ -45,7 +46,9 @@ def find_port():
     for p in sorted(glob.glob('/dev/serial/by-id/*')):
         if LIDAR_ID not in p:
             return p
-    for p in sorted(glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')):
+    # Fallback: ttyACM only (the QT Py's native USB). Never ttyUSB*: that is the LiDAR's CP2102N, and right after
+    # a USB re-enumeration its by-id link may not exist yet, so it can't be excluded by id (grabbed it once).
+    for p in sorted(glob.glob('/dev/ttyACM*')):
         if os.path.realpath(p) not in lidar_paths:
             return p
     return None

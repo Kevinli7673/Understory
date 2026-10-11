@@ -83,7 +83,7 @@ elif docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
   echo "ESP32 bridge already running."
 elif [ -n "$ESP32_PORT" ]; then
   echo "Starting ESP32 bridge on $ESP32_PORT..."
-  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py $ESP32_ARGS > /fetch_ws/logs/esp32_bridge.log 2>&1"
+  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py --port $ESP32_PORT $ESP32_ARGS > /fetch_ws/logs/esp32_bridge.log 2>&1"
 else
   echo "No ESP32 plugged in: the robot cannot drive and /sensors is empty. Plug it in and re-run this script."
 fi
