@@ -28,6 +28,7 @@ import time
 
 import rclpy
 from geometry_msgs.msg import Twist
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from std_msgs.msg import Bool, String
 
@@ -168,7 +169,7 @@ def main():
     node = Esp32Bridge(args.port, args.baud, args.hold)
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):  # Ctrl+C, or pkill / scout_down.sh
         pass
     finally:
         if node.ser is not None:
