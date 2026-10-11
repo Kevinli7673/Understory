@@ -25,6 +25,7 @@ setup(
             'localizer_node = scout_perception.localizer_node:main',
             'whisper_node = scout_perception.whisper_node:main',
             'ai_node = scout_perception.ai_node:main',
+            'logger_node = scout_perception.logger_node:main',
         ],
     },
 )

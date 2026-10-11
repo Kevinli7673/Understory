@@ -19,6 +19,9 @@ cloned at `~/fetch_ws/src/Understory`.
 | `scripts/save_frames.py`, `scripts/record_bag.sh` | Capture test data to `~/fetch_ws/frames` and `~/fetch_ws/bags`. |
 | `scripts/fake_survey.py` | Publish contract-correct fake `/survey/*` data for the Quest app and dashboard. |
 | `scripts/fake_sensors.py` | Publish fake `/sensors` (what the ESP32 bridge will send) so `/survey/readings` can be tested. |
+| `scripts/pose_from_tf.py` | TF `map -> base_link` -> `/pose` (PoseWithCovarianceStamped) for the Quest's robot marker; slam_toolbox here doesn't publish `/pose`. |
+| `scripts/esp32_bridge.py` | `/cmd_vel` -> ESP32 wheels (`firmware/esp32_drive`), ESP32 sensor JSON -> `/sensors`. Auto-picks the ESP32's serial port, never the LiDAR's. |
+| `../amd/deep_pass.py` | After a mission, on the AMD W7900 (ROCm): larger detector over every bubble frame -> `pins_deep.jsonl`. See `amd/README.md`. |
 | `scripts/ai_selftest.sh` | Feed plant photos through the whole AI chain on a separate ROS domain and print the pins. |
 | `docker/Dockerfile.ai` | The `scout-ros-ai` image: `scout-ros` plus CPU PyTorch, transformers and open_clip. `scout_ai_up.sh` builds it when missing. |
 | `docker/Dockerfile` | The `scout-ros` image. Its base image `fetch-ros` only exists on the Pi, so other machines load the exported image instead of building. |
@@ -119,7 +122,7 @@ This fallback has not been tested with two machines.
 
 ## Known gaps
 
-- No GPU container for the Jetson yet, so the AI runs on the CPU everywhere. `nanoowl_trt` is still a stub.
+- The Jetson has a GPU image (`pi/jetson/Dockerfile.gpu`) and a TensorRT detector (`nanoowl_trt`, see HANDOFF.md session 9). The Pi runs the AI on the CPU.
 - The Whisper node (`/voice/audio` -> `/voice/text`, started by `scout_ai_up.sh`) has only been tested with synthetic speech.
 - No ESP32 bridge: nothing drives the motors and nothing publishes the real `/sensors`.
 - The `/species` JSON is not in `AGENTS.md` yet (shape in `HANDOFF.md`, section 5).

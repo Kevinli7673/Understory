@@ -27,11 +27,13 @@ follow the rules in section 12.
 | Pi temperature with the AI running | **Too hot** | 83 °C and thermally throttled after 5 minutes (section 5) |
 | Jetson | **Nothing has run on it** | `jetson_up.sh` only passed a dry run on the Pi |
 | Pi and Jetson together | **Never tried** | |
-| Robot driving | **Not possible yet** | no ESP32 bridge in the repo, nothing consumes `/cmd_vel` |
-| `/sensors` from the ESP32 | **Does not exist** | `fake_sensors.py` stands in |
+| Robot driving | **Code written, not tried on hardware** | Kevin's `firmware/esp32_drive` and `pi/scripts/esp32_bridge.py` (Sat 5 PM). `scout_up.sh` starts the bridge when the board is plugged in; that part is untested too |
+| `/sensors` from the ESP32 | **Bridge republishes it; no sensor is wired in the firmware yet** | `fake_sensors.py` stands in |
 | Whisper (`/voice/audio` -> `/voice/text`) | Works with synthetic speech | 6 of 6 computer-spoken commands transcribed and parsed, Pi CPU, about 2.5 s each. **No human voice and no Quest clip tried yet** |
-| NanoOWL / TensorRT | Stub | speed upgrade only |
-| Logger, dashboard, Neon sync | Not in the repo | other owners |
+| NanoOWL / TensorRT | Works on the Jetson, and is its default | model 19 ms per frame against 62 ms in PyTorch; live `/detections` 15.3 Hz (the camera's rate) against 9.8 Hz; self-test 5 of 5 (section 11, session 9) |
+| Mission logger (`logger_node`) | Works with fake data | 3 fake bubbles, 36 frames, pins, readings and a map written in the `AGENTS.md` layout (session 10). No real mission logged yet |
+| AMD deep pass (`amd/deep_pass.py`) | Runs on the Jetson GPU. **Not run on the W7900 / ROCm** | 5 of 5 test photos named with OWLv2 base (session 10, `amd/README.md`) |
+| Dashboard, Neon sync | Not in the repo | other owners |
 
 The short version: **the full perception chain now runs on the Pi alone, slowly.** A plant photo held
 in front of the camera becomes a pin about 12 to 15 seconds later. The Jetson's job is to run the same
@@ -94,7 +96,7 @@ over ROS 2 Jazzy on `ROS_DOMAIN_ID=42`, over an iPhone hotspot. The live demo mu
 | File | What it is |
 | --- | --- |
 | `detector_node.py` | camera -> `/detections`. Parameters: `backend`, `prompts`, `score_threshold` |
-| `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (stub) |
+| `backends.py` | `dummy`, `owlvit_torch` (real), `nanoowl_trt` (real, Jetson only: TensorRT engine from `pi/scripts/build_owl_engine.py`) |
 | `species_node.py` | `/detections` + camera -> `/species`. Parameters: `backend`, `min_confidence` (0.5), `max_boxes` (3) |
 | `species_backends.py` | `dummy`, `bioclip` |
 | `species_labels.py` | **The species list. Edit this to match the habitat.** Also the "not a plant" list |
@@ -380,7 +382,8 @@ Things to tell Kevin:
 7. **Saturday night:** one full recorded mission as the fallback `AGENTS.md` asks for.
 8. **Voice with a real person.** The Whisper node exists (section 5a) but has only heard a
    synthetic voice. Hold X on the Quest, say each command, and read `~/fetch_ws/logs/whisper.log`.
-9. **NanoOWL + TensorRT**, and a PyTorch-versus-TensorRT speed number for the pitch.
+10. **AMD, needs someone with the Radeon Cloud login:** on the box, `bash amd/setup_amd.sh`, copy a mission folder over, `python amd/deep_pass.py missions/<id>` and `bash splat/run.sh missions/<id>`. Put `deep_report.json`'s numbers in the pitch. With no real mission yet, `fake_data/missions/m1` exercises the plumbing (its frames are drawings, so expect no pins).
+9. ~~NanoOWL + TensorRT, and a PyTorch-versus-TensorRT speed number for the pitch.~~ Done Sat 5 PM (section 11, session 9).
 
 Waiting on teammates:
 - **Hardware (Teammate 4):** ESP32 serial bridge (`/cmd_vel` in as plain `Twist`, `/sensors` JSON
@@ -503,6 +506,15 @@ installed on it."*
   reached 47 between 1:54 and 2:09 PM, with two and three GPU processes loading at once in 25 W mode.
   The limit is 5.05 A on the 5 V input. Since the changes above the highest reading is 3.4 A and the
   counter has not moved in an hour. `~/fetch_ws/logs/power_watch.py` logs it once a second.
+  **One more event at 4:04:44 PM** (count 48) with the board at about 2.0 A and 10 W, sampled 25 times a
+  second, so it was a spike shorter than 40 ms: several `ros2` commands started at that moment while
+  the GPU was busy. That is 1 event in two hours against 47 in fifteen minutes. The board slows its
+  clocks for an instant and shows the banner; nothing else happens. `sudo nvpmodel -m 0` (15 W mode)
+  should stop them at the cost of speed; not tried.
+- **Quest app on `main` (Kevin, 4 PM) checked against our side:** its contract classes match the pin,
+  bubble and reading JSON; its panel buttons send start / capture / resume / manual / return / stop on
+  `/voice/text`, all in the mission manager's vocabulary; Whisper's "star survey" still parses as start.
+  The app's notes say the endpoint is on the Jetson. It is on the Pi: `172.20.10.10`, port 10000.
 - `scout-ai` is now created with `--init`. Without it stopped nodes stayed as zombies, and the
   script's `pgrep` checks reported them as running.
 - **Pi dropping off the hotspot: fixed by moving the hotspot to 5 GHz** (iPhone: turn off "Maximize
@@ -534,7 +546,71 @@ installed on it."*
 - Left running at 3:40 PM. Pi: sensors, endpoint, Foxglove, Whisper. Jetson: mapping, Nav2, mission,
   panorama, `ai_node`, localizer. Start the Jetson side with `pi/jetson/jetson_up.sh`; on the Jetson it
   now defaults to the GPU image, one process and no Whisper.
-- Not done: NanoOWL + TensorRT; the Pi's copy of `scout_up.sh` lacks the network-buffer line.
+- **4:15 PM, both machines rebooted on request.** Pi: now on `main`; after the reboot `~/scout_up.sh`
+  then `~/scout_ai_up.sh --voice-only` brought back sensors (10 Hz, 15 Hz), endpoint and Whisper, and
+  a clip through the endpoint came back as text in 6.9 s, so `--voice-only` is tested on the Pi. The
+  Jetson's nodes kept running through the Pi's reboot and reconnected by themselves. Jetson: rebooted
+  at about 4:20 PM; **run `~/start_understory.sh` after it comes up** (memory guard, power logger,
+  then `jetson_up.sh`). Nothing starts by itself there except the two containers.
+- **4:22 PM, Jetson back up after the reboot.** `~/start_understory.sh` brought everything back with no
+  other step: mapping, Nav2, mission, panorama, `ai_node` and localizer. Checked from the Jetson at
+  4:32 PM: `/scan` 10.1 Hz, camera 15.4 Hz, `/detections` 9.8 Hz, `/mission/state` `IDLE`, TF
+  `map -> base_link` ok, 2.7 GB available (no Firefox open), 10 W, over-current counter 0 since boot.
+  The script's own "/detections" check failed twice and passed on the third try, as before. The script
+  used to hold the terminal after finishing (its two background helpers kept the output open); fixed.
+
+**Session 9, Sat 4:40 to 5:20 PM, TensorRT detector on the Jetson.** *"Go ahead with NanoOWL + TensorRT."*
+- **What it is.** `nanoowl_trt` runs OWL-ViT the way NanoOWL does: the image side (vision transformer, box
+  head, class head) is one TensorRT engine, and the prompts are encoded once with PyTorch at startup, so
+  they can change without a rebuild. It is written against TensorRT directly in `backends.py`; the
+  `nanoowl` package itself is not installed (it needs `torch2trt` and was written for older TensorRT).
+- **Image.** `Dockerfile.gpu` now adds `tensorrt-cu13` 11.4, `onnx` and `onnxscript`. The image was rebuilt
+  and `scout-ai` recreated from it. TensorRT 11 has no half-precision switch; the precision comes from
+  the ONNX file, so the export is done in half precision.
+- **Engine.** `docker exec scout-ai bash -c 'source /fetch_ws/install/setup.bash && python3
+  /fetch_ws/src/Understory/pi/scripts/build_owl_engine.py'` with the AI nodes stopped. 103 s, 189 MB, at
+  `~/fetch_ws/models/owlvit-base-patch32.engine` (not in the repo: an engine only runs on the kind of GPU
+  that built it). Lowest available memory during the build: about 0.8 GB.
+- **Speed** (`pi/scripts/detector_bench.py`, 100 frames of 640x480, live AI stopped, mapping and Nav2 running):
+
+  | | PyTorch, half precision | TensorRT |
+  | --- | --- | --- |
+  | Model alone | 61.8 ms (16.2 per second) | 19.0 ms (52.7 per second) |
+  | Whole frame (resize + model + box filtering) | 78.1 ms (12.8 per second) | 40.3 ms (24.8 per second) |
+  | Live `/detections`, 15 Hz camera | 9.8 Hz | 15.3 Hz (every frame) |
+
+- **The resize to 768x768 now runs on the GPU in both backends** (6 ms instead of 26 ms). Before that
+  change the PyTorch whole frame was 103.5 ms. The resized image differs slightly from the CPU one
+  and some scores moved (one box on the cogongrass photo went from 0.21 to 0.40); the self-test result
+  did not change.
+- **Same answers.** Boxes on the five test photos match PyTorch's to a few pixels and about 0.02 in
+  score. `ai_selftest.sh` with `AI_ONE_PROCESS=1`: PASS 5 of 5 with both backends, same five pins, same
+  confidences.
+- **A bug found and fixed on the way:** with the resize on PyTorch's default CUDA stream and the engine on
+  its own, every frame got the boxes of the frame before it. All GPU steps now run on one stream;
+  200 alternating plant and grey frames gave 0 wrong answers.
+- **Default.** `jetson_up.sh` picks `nanoowl_trt` when the engine file exists and the image is
+  `scout-ros-ai-gpu`. `DETECTOR_BACKEND=owlvit_torch` goes back to PyTorch. The Pi is unchanged.
+- **Over-current counter went from 0 to 14** between 5:06 and 5:08 PM, all during the benchmark and
+  self-test runs (board at 13 to 15 W). None since; the live stack sits at about 10.5 W with 2.4 GB available.
+- `~/start_understory.sh` now returns when it is done (checked on this restart).
+- Left running at 5:17 PM. Jetson: mapping, Nav2, mission, panorama, `ai_node` (TensorRT detector),
+  localizer. Pi: sensors, endpoint, Foxglove, Whisper. `/scan` 10.0 Hz, camera 15.2 Hz, `/mission/state` `IDLE`.
+- Not tested: a real plant in front of the live camera with the new backend.
+
+**Session 10, Sat 7:00 to 8:20 PM, Kevin's pushes, logger, AMD.** *"Focus on what is next, integrate Kevin's pushes, and integrate AMD's challenge (FSR 4, or ROCm on the Radeon cloud hardware)."* The Jetson had just been power-cycled.
+- **Merged `quest-app` (Kevin, 4:20 to 6:40 PM) into `jetson-bringup`:** ESP32 mecanum firmware and `pi/scripts/esp32_bridge.py` (he marks both untested on hardware), `pi/scripts/pose_from_tf.py`, Quest fixes, and his note that the headset connected to the Pi live at 6:20 PM with the Pi on his hotspot "iPhone (2)" at `172.20.10.3`.
+- **`/pose`:** `scout_nav.launch.py` now starts `pose_from_tf.py` (argument `pose:=false` turns it off). Seen on the Jetson: "TF found, publishing /pose".
+- **ESP32 bridge:** `scout_up.sh` starts it when a USB serial device other than the LiDAR is plugged in (`NO_DRIVE=1` skips it) and `scout_down.sh` stops it. **Syntax-checked only**: the Pi could not be reached. `pyserial` 3.5 is in the `scout-ros` image. The firmware has no sensor wired yet, so `/sensors` stays empty until someone adds one.
+- **Whisper, Kevin's request for a command prompt:** `whisper_node` has a `prompt` parameter, default "Robot commands: start survey, stop, return home, come back, manual, capture, resume." On the nine synthetic clips it fixed "star survey" -> "start survey" and changed nothing else, **but the noise clip came out as "start survey"**. So the node now also drops a transcript whose mean token log-probability is under `min_logprob` (-1.0): speech scored -0.18 to -0.67, noise and silence -1.27 and -1.69. Through ROS on domain 43: four commands published, the noise clip logged as dropped. Synthetic voices only. The log line shows the score, for tuning with a real voice. **The Pi runs Whisper and does not have this code yet.**
+- **Mission logger, new: `logger_node`** (`mission_log.py`, 7 unit tests). Nothing in the repo wrote the mission folder, so the cloud steps had no real input. It writes `~/fetch_ws/missions/<id>/` `bubbles.jsonl`, `pins.jsonl`, `readings.jsonl`, `frames/<bubble_id>_<index>.jpg`, `map.pgm` + `map.yaml` (map saved at each bubble). `scout_nav.launch.py` starts it (`logger:=false` turns it off); `jetson_up.sh` starts it alone when mapping runs on the Pi. Tested on domain 43 against `fake_survey.py`. The logger is listed under Teammate 4 in `AGENTS.md`; if theirs arrives, run only one.
+- **AMD challenge.** FSR 4 does not fit: it is an upscaler for Radeon RX 9000 desktop cards, and our graphics run on a standalone Quest. The ROCm half is what the project already planned ("deep in the cloud"): Kevin's `splat/` (MASt3R + gsplat on the W7900). Added a second ROCm workload, **`amd/deep_pass.py`**: after a mission it re-reads every bubble frame on the W7900 with OWLv2 large + BioCLIP and writes `pins_deep.jsonl`, `crops_deep/` and `deep_report.json` (speed, GPU memory, and which live pins it confirmed or added). Details, the test table and what is untested: `amd/README.md`. **Nobody has run it or `splat/` on the AMD box from this machine; there are no AMD credentials here.**
+- **A mistake to know about:** at 7:50 PM `~/start_understory.sh` started mapping, Nav2 and the mission manager on the Jetson while the Pi was off the network. The Pi then appeared for about two minutes with **its own** `scout_up.sh --nav` stack and a Quest connected, so two slam_toolbox, mission manager and twist_mux instances were on the network for that time. The Jetson's launch was stopped at about 8:05 PM. **While the Pi runs `--nav`, do not run `jetson_up.sh` without `~/scout_down.sh --keep && ~/scout_up.sh` on the Pi first.** `jetson_up.sh` checks for this, but cannot see a Pi that is off the network at that moment.
+- **Network, unresolved.** The Jetson is on "Alvaro's iPhone" (`172.20.10.11`). The Pi answered at neither `.10` nor `.3` for most of the session, was visible at `.3` from about 7:51 to 8:05 PM, then gone again. Both phones hand out `172.20.10.x`, so the Pi may be moving between them. Pi and Jetson must be on the same hotspot.
+- Left running at 8:20 PM on the Jetson: `ai_node` (TensorRT detector), localizer, `logger_node`, memory guard, power logger. Not running here: mapping, Nav2, mission, panorama (the Pi has them).
+- Not pushed: the Jetson has no GitHub login and the Pi could not be reached. `jetson-bringup` is ahead of `origin` by the merge and this session's commit.
+- **For Kevin: `splat/align.py` is an empty file at the tip of every branch**, and `mast3r_poses.py` imports `align_sim3`, `apply_to_points` and `apply_to_pose` from it. As it stands the MASt3R step fails at import, so `splat/run.sh` always falls through to the Depth Anything point cloud, and `python -m pytest splat/tests` fails to collect. The first commit has a 1.5 KB version, emptied by the "rescue: uncommitted work" commit: look at `git show 304f251:splat/align.py` before restoring it. Not touched (`splat/` is his).
+- Left on disk, safe to delete: `~/fetch_ws/logs/deep_test/` (the photo test mission).
 
 ## 12. Rules for anyone (or any agent) continuing
 
@@ -571,6 +647,7 @@ date                          # check after every reboot
 SCOUT_PEER=172.20.10.10 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 NO_AI=1 ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
 AI_IMAGE=<cuda image> AI_RUNTIME=nvidia ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh
+DETECTOR_BACKEND=owlvit_torch ~/fetch_ws/src/Understory/pi/jetson/jetson_up.sh   # PyTorch detector instead of TensorRT
 tegrastats
 
 # ---- inside the scout container ----

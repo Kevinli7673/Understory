@@ -24,6 +24,7 @@ For the hackathon, an indoor mecanum robot driving through a staged habitat on t
 - **Robotics**: ROS 2 Jazzy in Docker with slam_toolbox, Nav2, twist_mux, and our own mission manager and survey planner
 - **VR**: Unity 6 with the Meta XR SDK and OpenXR on a Meta Quest, talking to ROS through ROS-TCP-Connector
 - **3D reconstruction**: MASt3R and gsplat on an AMD Radeon PRO W7900, with Depth Anything V2 as a fallback
+- **Cloud re-analysis**: PyTorch on ROCm on the same W7900: OWLv2 and BioCLIP re-read every survey frame after the mission and check the robot's live pins <!-- amd/deep_pass.py. Not yet run on the W7900 as of Sat 8 PM: run it before submitting, or remove this line -->
 - **Tooling**: Foxglove for debugging; pytest for the geometry, voice, and mission logic
 
 ## Technical details
