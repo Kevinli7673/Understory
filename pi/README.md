@@ -21,6 +21,7 @@ cloned at `~/fetch_ws/src/Understory`.
 | `scripts/fake_sensors.py` | Publish fake `/sensors` (what the ESP32 bridge will send) so `/survey/readings` can be tested. |
 | `scripts/pose_from_tf.py` | TF `map -> base_link` -> `/pose` (PoseWithCovarianceStamped) for the Quest's robot marker; slam_toolbox here doesn't publish `/pose`. |
 | `scripts/esp32_bridge.py` | `/cmd_vel` -> ESP32 wheels (`firmware/esp32_drive`), ESP32 sensor JSON -> `/sensors`. Auto-picks the ESP32's serial port, never the LiDAR's. |
+| `../amd/deep_pass.py` | After a mission, on the AMD W7900 (ROCm): larger detector over every bubble frame -> `pins_deep.jsonl`. See `amd/README.md`. |
 | `scripts/ai_selftest.sh` | Feed plant photos through the whole AI chain on a separate ROS domain and print the pins. |
 | `docker/Dockerfile.ai` | The `scout-ros-ai` image: `scout-ros` plus CPU PyTorch, transformers and open_clip. `scout_ai_up.sh` builds it when missing. |
 | `docker/Dockerfile` | The `scout-ros` image. Its base image `fetch-ros` only exists on the Pi, so other machines load the exported image instead of building. |

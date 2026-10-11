@@ -3,6 +3,7 @@
 # Safe to re-run: anything already running is left alone.
 #   ~/scout_up.sh         sensors + Foxglove + Quest endpoint (use this when the Jetson runs mapping/mission)
 #   ~/scout_up.sh --nav   also mapping + Nav2 + mission manager + panorama on the Pi (no Jetson needed)
+#   NO_DRIVE=1 ~/scout_up.sh   do not start the ESP32 bridge (wheels and /sensors) even if the board is plugged in
 #   SCOUT_PEER=<other machine's IP> ~/scout_up.sh   only if the Jetson can't see the Pi's topics:
 #       makes ROS discovery talk straight to that IP instead of relying on multicast
 
@@ -69,6 +70,22 @@ else
   docker exec -d $PEER scout bash -c "$SRC && ros2 run ros_tcp_endpoint default_server_endpoint --ros-args -p ROS_IP:=0.0.0.0 > /fetch_ws/logs/tcp_endpoint.log 2>&1"
 fi
 
+# --- 4a. ESP32 bridge: /cmd_vel -> wheels, sensor pod -> /sensors (only when the board is plugged in) ---
+# The LiDAR is a USB serial device too; esp32_bridge.py never picks it. /cmd_vel only comes from twist_mux
+# (e-stop > Quest sticks > autonomy), and the firmware stops the wheels 300 ms after the last command.
+LIDAR_ID=5839a1d8ce6ff01187f694301045c30f
+ESP32_PORT=$(ls /dev/serial/by-id/* 2>/dev/null | grep -v "$LIDAR_ID" | head -1)
+if [ -n "$NO_DRIVE" ]; then
+  echo "ESP32 bridge not started (NO_DRIVE is set)."
+elif docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
+  echo "ESP32 bridge already running."
+elif [ -n "$ESP32_PORT" ]; then
+  echo "Starting ESP32 bridge on $ESP32_PORT..."
+  docker exec -d $PEER scout bash -c "$SRC && python3 /fetch_ws/src/Understory/pi/scripts/esp32_bridge.py > /fetch_ws/logs/esp32_bridge.log 2>&1"
+else
+  echo "No ESP32 plugged in: the robot cannot drive and /sensors is empty. Plug it in and re-run this script."
+fi
+
 # --- 4b. optional: mapping + mission + panorama on the Pi (Teammate 3's understory_nav, no Nav2) ---
 if [ "$1" = "--nav" ]; then
   if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
@@ -94,6 +111,11 @@ if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   if in_scout "timeout 5 ros2 run tf2_ros tf2_echo map base_link 2>&1" | grep -q Translation; then
     echo "  TF map -> base_link: ok (slam is localizing)"
   else warn "no TF map -> base_link (slam_toolbox not mapping; check ~/fetch_ws/logs/nav.log)"; fi
+fi
+if docker exec scout pgrep -f esp32_bridge.py >/dev/null; then
+  if grep -q 'ESP32 on ' "$HOME/fetch_ws/logs/esp32_bridge.log" 2>/dev/null; then
+    echo "  ESP32 bridge: $(grep 'ESP32 on ' "$HOME/fetch_ws/logs/esp32_bridge.log" | tail -1 | sed 's/.*ESP32 on /connected on /')"
+  else warn "ESP32 bridge is running but has not opened the serial port. See ~/fetch_ws/logs/esp32_bridge.log"; fi
 fi
 for port in 10000 8765; do
   if ss -ltn | grep -q ":$port "; then echo "  port $port: listening"; else warn "port $port is NOT listening"; fi

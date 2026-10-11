@@ -69,6 +69,11 @@ if docker exec scout pgrep -f scout_nav.launch.py >/dev/null; then
   echo "Nav already running here."
 elif in_scout "timeout 5 ros2 node list" | grep -q slam_toolbox; then
   warn "slam_toolbox is already running on the Pi. Stop it there first (~/scout_down.sh --keep && ~/scout_up.sh), then re-run this."
+  # the mission still has to be written to disk; the logger only listens, so it is safe beside the Pi's stack
+  if ! in_scout "timeout 5 ros2 node list" | grep -q logger_node; then
+    echo "Starting the mission logger here (the Pi's stack does not run one)..."
+    docker exec -d $PEER scout bash -c "$SRC && ros2 run scout_perception logger_node > /fetch_ws/logs/logger.log 2>&1"
+  fi
 else
   echo "Starting slam + Nav2 + mission + panorama..."
   docker exec -d $PEER scout bash -c "$SRC && ros2 launch /fetch_ws/src/Understory/pi/scout_nav.launch.py > /fetch_ws/logs/nav.log 2>&1"

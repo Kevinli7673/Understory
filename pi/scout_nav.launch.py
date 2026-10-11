@@ -11,14 +11,17 @@ targets Humble and does not come up on Jazzy. Differences:
   - nav2 defaults to true only if Nav2 is installed. Without it "start survey" drops the mission
     to MANUAL: drive with the sticks and say "capture" for a bubble (the fallback in AGENTS.md);
   - no static TFs here; scout_bringup.launch.py publishes base_link -> laser / camera;
-  - also starts scout_perception's panorama_node, which answers /survey/capture.
+  - also starts scout_perception's panorama_node, which answers /survey/capture;
+  - also starts scout_perception's logger_node, which writes missions/<mission_id>/ to disk;
+  - also starts pi/scripts/pose_from_tf.py: /pose from TF map -> base_link at 10 Hz. slam_toolbox only
+    publishes /pose after a scan update, so a robot standing still had no position in the Quest app.
 Run it on ONE machine only (Pi or Jetson), never both.
 """
 import os
 
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction, IncludeLaunchDescription
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -43,6 +46,8 @@ def generate_launch_description():
         # cmd_vel: dead-reckon odom from /cmd_vel; external: something else publishes odom -> base_link
         DeclareLaunchArgument('odom_source', default_value='cmd_vel'),
         DeclareLaunchArgument('panorama', default_value='true'),
+        DeclareLaunchArgument('pose', default_value='true'),
+        DeclareLaunchArgument('logger', default_value='true'),
     ]
 
     slam = IncludeLaunchDescription(
@@ -87,4 +92,11 @@ def generate_launch_description():
     panorama = Node(package='scout_perception', executable='panorama_node', name='panorama_node',
                     condition=IfCondition(LaunchConfiguration('panorama')))
 
-    return LaunchDescription(args + [slam, odom, mux, nav2, mission, panorama])
+    logger = Node(package='scout_perception', executable='logger_node', name='logger_node',
+                  condition=IfCondition(LaunchConfiguration('logger')))
+
+    pose = ExecuteProcess(
+        cmd=['python3', os.path.join(os.path.dirname(os.path.realpath(__file__)), 'scripts', 'pose_from_tf.py')],
+        condition=IfCondition(LaunchConfiguration('pose')), output='screen')
+
+    return LaunchDescription(args + [slam, odom, mux, nav2, mission, panorama, logger, pose])
