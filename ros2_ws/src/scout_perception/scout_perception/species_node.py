@@ -42,7 +42,9 @@ class SpeciesNode(Node):
 
     def on_image(self, msg):
         self.frames[msg.header.stamp.sec * 10**9 + msg.header.stamp.nanosec] = bytes(msg.data)
-        while len(self.frames) > 60:                    # about 4 s at 15 Hz
+        # Keep 20 s: on the Pi's CPU the detector takes ~4.3 s per frame, so a 60-frame (4 s) cache had
+        # already dropped the frame by the time its detections arrived, and nothing was ever named.
+        while len(self.frames) > 300:                   # 20 s at 15 Hz, ~20 MB of JPEGs
             self.frames.popitem(last=False)
 
     def on_detections(self, msg):
